@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>finderX — Cosmic Discovery Engine</title>
+  <!-- Aladin Lite v3 -->
+  <link rel="stylesheet"
+        href="https://aladin.cds.unistra.fr/AladinLite/api/v3/latest/aladin.min.css" />
+  <script src="https://aladin.cds.unistra.fr/AladinLite/api/v3/latest/aladin.js"
+          charset="utf-8"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg0:    #040710;
+      --bg1:    #080d1e;
+      --bg2:    #0d1530;
+      --border: rgba(96,165,250,0.12);
+      --blue:   #60a5fa;
+      --purple: #a78bfa;
+      --green:  #34d399;
+      --amber:  #fbbf24;
+      --orange: #fb923c;
+      --text:   #c8d8ff;
+      --muted:  #5a6a96;
+      --font:   "JetBrains Mono", "SF Mono", "Menlo", monospace;
+    }
+
+    html, body { height: 100%; overflow: hidden; background: var(--bg0); color: var(--text); font-family: var(--font); }
+
+    /* ── Layout ─────────────────────────────────────────────────── */
+    #app { display: flex; flex-direction: column; height: 100%; }
+
+    #topbar {
+      display: flex; align-items: center; gap: 14px;
+      padding: 10px 18px;
+      background: rgba(4,7,16,0.97);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0; z-index: 10;
+    }
+
+    .logo {
+      font-size: 18px; font-weight: 800; letter-spacing: -0.5px;
+      background: linear-gradient(135deg, var(--blue), var(--purple), var(--green));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .tagline { font-size: 10px; color: var(--muted); letter-spacing: 2px; text-transform: uppercase; }
+
+    #sky-coords-label { margin-left: auto; font-size: 11px; color: var(--muted); }
+    #data-sources     { font-size: 10px; color: #2a3555; letter-spacing: 0.5px; }
+
+    #body { display: flex; flex: 1; overflow: hidden; }
+
+    /* ── Sky viewer ──────────────────────────────────────────────── */
+    #aladin-lite-div { flex: 1; height: 100%; min-width: 0; }
+
+    /* ── Side panel ──────────────────────────────────────────────── */
+    #panel {
+      width: 310px; flex-shrink: 0;
+      background: var(--bg1);
+      border-left: 1px solid var(--border);
+      display: flex; flex-direction: column;
+      overflow: hidden;
+    }
+
+    .section {
+      padding: 14px 14px 12px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .section-title {
+      font-size: 9px; text-transform: uppercase; letter-spacing: 2px;
+      color: var(--muted); margin-bottom: 10px;
+    }
+
+    /* inputs */
+    .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .field { margin-bottom: 8px; }
+    label {
+      display: block; font-size: 9px; text-transform: uppercase;
+      letter-spacing: 1px; color: var(--muted); margin-bottom: 3px;
+    }
+    input, select {
+      width: 100%; background: rgba(96,165,250,0.04);
+      border: 1px solid rgba(96,165,250,0.18); border-radius: 4px;
+      padding: 7px 9px; color: var(--text); font-size: 11px; font-family: var(--font);
+      outline: none; transition: border-color .15s;
+    }
+    input:focus, select:focus { border-color: rgba(96,165,250,0.45); }
+    select option { background: #0d1328; }
+
+    .inline-row { display: flex; gap: 6px; }
+    .inline-row input { flex: 1; }
+
+    /* buttons */
+    .btn-sm {
+      padding: 7px 10px; font-size: 10px; border-radius: 4px; cursor: pointer;
+      border: 1px solid rgba(96,165,250,0.3); background: rgba(96,165,250,0.07);
+      color: var(--blue); font-family: var(--font); transition: all .15s; white-space: nowrap;
+    }
+    .btn-sm:hover { background: rgba(96,165,250,0.15); }
+
+    #run-btn {
+      width: 100%; padding: 11px; font-size: 13px; font-weight: 700;
+      border: none; border-radius: 6px; cursor: pointer;
+      background: linear-gradient(135deg, #1d4ed8, #7c3aed);
+      color: #fff; font-family: var(--font); letter-spacing: 0.3px;
+      transition: all .2s;
+    }
+    #run-btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 18px rgba(29,78,216,.45); }
+    #run-btn:disabled { opacity: .4; cursor: not-allowed; transform: none; }
+
+    /* progress */
+    #prog-wrap { height: 3px; background: rgba(96,165,250,.08); border-radius: 2px; margin-top: 10px; overflow: hidden; display: none; }
+    #prog-fill { height: 100%; border-radius: 2px; background: linear-gradient(90deg, var(--blue), var(--purple), var(--green)); transition: width .4s ease; }
+
+    /* log */
+    #log-box {
+      background: rgba(0,0,0,.35); border-radius: 4px; padding: 8px;
+      font-size: 10px; line-height: 1.7; max-height: 110px; overflow-y: auto;
+      display: none; margin-top: 8px; color: #7a8fb8;
+    }
+
+    /* stats */
+    #stats-section { display: none; }
+    .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    .stat-card {
+      background: rgba(96,165,250,.04); border: 1px solid rgba(96,165,250,.12);
+      border-radius: 5px; padding: 8px 10px; text-align: center;
+    }
+    .stat-val {
+      font-size: 20px; font-weight: 800;
+      background: linear-gradient(135deg, var(--blue), var(--purple));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .stat-lbl { font-size: 8px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin-top: 1px; }
+
+    #discover-banner {
+      display: none; margin-top: 8px;
+      background: linear-gradient(135deg, rgba(52,211,153,.08), rgba(124,58,237,.08));
+      border: 1px solid rgba(52,211,153,.3); border-radius: 5px;
+      padding: 8px 10px; font-size: 10px; color: var(--green); line-height: 1.5;
+    }
+
+    /* results */
+    #results-scroll { flex: 1; overflow-y: auto; }
+
+    .result-item {
+      padding: 9px 14px; border-bottom: 1px solid rgba(96,165,250,.06);
+      cursor: pointer; transition: background .12s; border-left: 2px solid transparent;
+    }
+    .result-item:hover { background: rgba(96,165,250,.04); }
+    .result-item.is-new    { border-left-color: var(--green); }
+    .result-item.is-anom   { border-left-color: var(--amber); }
+    .result-item.is-sso    { border-left-color: var(--orange); }
+
+    .r-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 6px; margin-bottom: 3px; }
+    .r-id   { font-size: 10px; font-weight: 700; color: var(--blue); max-width: 195px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .r-type { font-size: 8px; padding: 2px 5px; border-radius: 3px; text-transform: uppercase; letter-spacing: .4px; flex-shrink: 0; }
+    .t-star        { background: rgba(251,191,36,.12);  color: var(--amber); }
+    .t-asteroid    { background: rgba(251,146,60,.12);  color: var(--orange); }
+    .t-comet       { background: rgba(251,146,60,.12);  color: var(--orange); }
+    .t-galaxy      { background: rgba(167,139,250,.12); color: var(--purple); }
+    .t-quasar      { background: rgba(96,165,250,.12);  color: var(--blue); }
+    .t-extragalactic { background: rgba(167,139,250,.12); color: var(--purple); }
+
+    .r-sub { font-size: 9px; color: var(--muted); }
+    .r-novelty { font-size: 9px; color: var(--green); font-weight: 700; margin-top: 2px; }
+    .r-flags { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px; }
+    .flag {
+      font-size: 8px; padding: 1px 5px; border-radius: 2px;
+      text-transform: uppercase; letter-spacing: .3px;
+    }
+    .f-new     { background: rgba(52,211,153,.12);  color: var(--green); }
+    .f-anom    { background: rgba(251,191,36,.12);  color: var(--amber); }
+    .f-known   { background: rgba(90,106,150,.12);  color: var(--muted); }
+    .f-pha     { background: rgba(251,146,60,.15);  color: var(--orange); }
+    .f-blue    { background: rgba(96,165,250,.12);  color: var(--blue); }
+    .f-default { background: rgba(90,106,150,.1);   color: #7a8fb8; }
+
+    /* empty */
+    .empty-state { padding: 36px 20px; text-align: center; color: #2a3555; font-size: 11px; line-height: 1.9; }
+    .empty-icon  { font-size: 38px; margin-bottom: 10px; opacity: .35; }
+
+    /* scrollbars */
+    ::-webkit-scrollbar         { width: 4px; height: 4px; }
+    ::-webkit-scrollbar-track   { background: transparent; }
+    ::-webkit-scrollbar-thumb   { background: rgba(96,165,250,.18); border-radius: 2px; }
+
+    /* Target indicator ring in sky */
+    .target-ring { pointer-events: none; }
+  </style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ── Top bar ───────────────────────────────────────────────── -->
+  <div id="topbar">
+    <div>
+      <div class="logo">finderX</div>
+      <div class="tagline">Cosmic Discovery Engine</div>
+    </div>
+    <div id="sky-coords-label">Move mouse over sky …</div>
+    <div id="data-sources">Gaia DR3 &nbsp;·&nbsp; SIMBAD &nbsp;·&nbsp; MPC/SkyBoT &nbsp;·&nbsp; NED &nbsp;·&nbsp; JPL SBDB &nbsp;·&nbsp; SDSS DR16</div>
+  </div>
+
+  <!-- ── Body ──────────────────────────────────────────────────── -->
+  <div id="body">
+
+    <!-- Sky viewer -->
+    <div id="aladin-lite-div"></div>
+
+    <!-- Control panel -->
+    <div id="panel">
+
+      <!-- 1. Target -->
+      <div class="section">
+        <div class="section-title">Target</div>
+
+        <div class="field">
+          <label>Resolve object name</label>
+          <div class="inline-row">
+            <input id="obj-name" type="text" placeholder="Orion Nebula, M87, Vega …" />
+            <button class="btn-sm" onclick="resolveName()">Go</button>
+          </div>
+        </div>
+
+        <div class="row2">
+          <div class="field">
+            <label>RA (deg)</label>
+            <input id="ra" type="number" value="83.8221" step="0.0001" min="0" max="360" />
+          </div>
+          <div class="field">
+            <label>Dec (deg)</label>
+            <input id="dec" type="number" value="-5.3911" step="0.0001" min="-90" max="90" />
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Search radius (deg)</label>
+          <input id="radius" type="number" value="0.25" step="0.05" min="0.05" max="2.0" />
+        </div>
+
+        <div style="font-size:10px; color:var(--muted); padding:5px 8px;
+                    background:rgba(96,165,250,.04); border-radius:4px;
+                    border:1px solid var(--border); cursor:pointer"
+             id="active-target-label"
+             onclick="flyToTarget()">
+          <span style="color:#374a78">▶</span>
+          &nbsp;<span id="active-target">RA 83.8221° / Dec -5.3911°</span>
+        </div>
+      </div>
+
+      <!-- 2. Detection -->
+      <div class="section">
+        <div class="section-title">Detection</div>
+
+        <div class="row2">
+          <div class="field">
+            <label>Object class</label>
+            <select id="obj-type">
+              <option value="all">All classes</option>
+              <option value="stars">Stars</option>
+              <option value="solar_system">Asteroids / Comets</option>
+              <option value="galaxies">Galaxies / QSOs</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Sky survey</label>
+            <select id="survey-sel">
+              <option value="P/DSS2/color">DSS2 Color</option>
+              <option value="P/DSS2/red">DSS2 Red</option>
+              <option value="P/2MASS/color">2MASS</option>
+              <option value="P/SDSS9/color">SDSS Color</option>
+              <option value="P/allWISE/color">WISE IR</option>
+              <option value="P/XMM/EPIC">XMM X-ray</option>
+              <option value="P/GALEXGR6/AIS/color">GALEX UV</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3. Run -->
+      <div class="section">
+        <button id="run-btn" onclick="startDetection()">🔭 Start Detection</button>
+        <div id="prog-wrap"><div id="prog-fill" style="width:0%"></div></div>
+        <div id="log-box"></div>
+      </div>
+
+      <!-- 4. Stats -->
+      <div class="section" id="stats-section">
+        <div class="section-title">Results</div>
+        <div class="stat-grid">
+          <div class="stat-card"><div class="stat-val" id="s-total">0</div><div class="stat-lbl">Total</div></div>
+          <div class="stat-card"><div class="stat-val" id="s-uncat">0</div><div class="stat-lbl">Uncatalogued</div></div>
+          <div class="stat-card"><div class="stat-val" id="s-anom">0</div><div class="stat-lbl">ML Anomalous</div></div>
+          <div class="stat-card"><div class="stat-val" id="s-new">0</div><div class="stat-lbl">New Candidates</div></div>
+        </div>
+        <div id="discover-banner">
+          ✨ Potential new discoveries detected!<br>
+          Green-bordered items below are uncatalogued <strong>and</strong> statistically anomalous.
+        </div>
+      </div>
+
+      <!-- 5. Results list -->
+      <div id="results-scroll">
+        <div class="empty-state">
+          <div class="empty-icon">🌌</div>
+          Click anywhere on the sky map to set a target, then hit<br>
+          <strong>Start Detection</strong> to hunt for uncatalogued objects.<br><br>
+          <span style="color:#1e2840; font-size:9px">Data: Gaia DR3 · SIMBAD · MPC · NED · SDSS</span>
+        </div>
+      </div>
+
+    </div><!-- /panel -->
+  </div><!-- /body -->
+</div><!-- /app -->
+
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+// Aladin Lite initialisation
+// ─────────────────────────────────────────────────────────────────────────────
+let aladin = null;
+let currentJob = null;
+let pollTimer  = null;
+
+A.init.then(() => {
+  aladin = A.aladin('#aladin-lite-div', {
+    survey:                 'P/DSS2/color',
+    fov:                    0.6,
+    target:                 '83.8221 -5.3911',
+    showReticle:            true,
+    showZoomControl:        true,
+    showFullscreenControl:  true,
+    showLayersControl:      true,
+    showGotoControl:        true,
+    showSimbadPointerControl: true,
+    cooFrame:               'ICRS',
+    backgroundColor:        '#040710',
+    reticleColor:           'rgba(96,165,250,0.75)',
+    reticleSize:            28,
+  });
+
+  aladin.on('click', () => {
+    const [ra, dec] = aladin.getRaDec();
+    document.getElementById('ra').value  = ra.toFixed(5);
+    document.getElementById('dec').value = dec.toFixed(5);
+    updateTargetLabel(ra, dec);
+  });
+
+  aladin.on('positionChanged', pos => {
+    document.getElementById('sky-coords-label').textContent =
+      `RA ${pos.ra.toFixed(4)}°  Dec ${pos.dec.toFixed(4)}°`;
+  });
+});
+
+document.getElementById('survey-sel').addEventListener('change', function () {
+  if (aladin) aladin.setImageSurvey(this.value);
+});
+
+function updateTargetLabel(ra, dec) {
+  document.getElementById('active-target').textContent =
+    `RA ${parseFloat(ra).toFixed(5)}°  /  Dec ${parseFloat(dec).toFixed(5)}°`;
+}
+
+function flyToTarget() {
+  if (!aladin) return;
+  const ra  = parseFloat(document.getElementById('ra').value);
+  const dec = parseFloat(document.getElementById('dec').value);
+  const r   = parseFloat(document.getElementById('radius').value);
+  aladin.gotoRaDec(ra, dec);
+  aladin.setFov(r * 2.5);
+}
+
+['ra','dec'].forEach(id => {
+  document.getElementById(id).addEventListener('change', () => {
+    updateTargetLabel(
+      document.getElementById('ra').value,
+      document.getElementById('dec').value,
+    );
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Name resolver
+// ─────────────────────────────────────────────────────────────────────────────
+async function resolveName() {
+  const name = document.getElementById('obj-name').value.trim();
+  if (!name) return;
+  try {
+    const r = await fetch('/api/resolve', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({name}),
+    });
+    const d = await r.json();
+    if (d.error) { alert(d.error); return; }
+    document.getElementById('ra').value  = d.ra.toFixed(5);
+    document.getElementById('dec').value = d.dec.toFixed(5);
+    updateTargetLabel(d.ra, d.dec);
+    if (aladin) { aladin.gotoObject(name); }
+  } catch (e) { alert('Resolve error: ' + e.message); }
+}
+
+document.getElementById('obj-name').addEventListener('keydown', e => {
+  if (e.key === 'Enter') resolveName();
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Detection
+// ─────────────────────────────────────────────────────────────────────────────
+async function startDetection() {
+  const ra     = parseFloat(document.getElementById('ra').value);
+  const dec    = parseFloat(document.getElementById('dec').value);
+  const radius = parseFloat(document.getElementById('radius').value);
+  const type   = document.getElementById('obj-type').value;
+
+  // Reset UI
+  clearResults();
+  document.getElementById('run-btn').disabled = true;
+  document.getElementById('run-btn').textContent = '⏳ Scanning …';
+  document.getElementById('prog-wrap').style.display = 'block';
+  document.getElementById('log-box').style.display   = 'block';
+  document.getElementById('log-box').innerHTML        = '';
+  document.getElementById('stats-section').style.display = 'none';
+  document.getElementById('discover-banner').style.display = 'none';
+  setProgress(0);
+
+  // Fly to target
+  if (aladin) {
+    aladin.gotoRaDec(ra, dec);
+    aladin.setFov(radius * 2.5);
+  }
+
+  try {
+    const resp = await fetch('/api/detect', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ra, dec, radius, type}),
+    });
+    const d = await resp.json();
+    currentJob = d.job_id;
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(poll, 1200);
+  } catch(e) {
+    resetRunBtn();
+    alert('Failed to start detection: ' + e.message);
+  }
+}
+
+async function poll() {
+  if (!currentJob) return;
+  try {
+    const resp = await fetch(`/api/status/${currentJob}`);
+    const d = await resp.json();
+    setProgress(d.progress || 0);
+    updateLog(d.log || []);
+    if (d.status === 'complete') {
+      clearInterval(pollTimer);
+      renderResults(d);
+      resetRunBtn();
+    } else if (d.status === 'error') {
+      clearInterval(pollTimer);
+      appendLog('❌ ' + (d.error || 'Unknown error'));
+      resetRunBtn();
+    }
+  } catch(e) { console.error(e); }
+}
+
+function setProgress(pct) {
+  document.getElementById('prog-fill').style.width = pct + '%';
+}
+
+function updateLog(lines) {
+  const el = document.getElementById('log-box');
+  el.innerHTML = lines.map(l => `<div>${l}</div>`).join('');
+  el.scrollTop = el.scrollHeight;
+}
+
+function appendLog(msg) {
+  const el = document.getElementById('log-box');
+  el.innerHTML += `<div>${msg}</div>`;
+  el.scrollTop = el.scrollHeight;
+}
+
+function resetRunBtn() {
+  const btn = document.getElementById('run-btn');
+  btn.disabled = false;
+  btn.textContent = '🔭 Start Detection';
+}
+
+function clearResults() {
+  document.getElementById('results-scroll').innerHTML = `
+    <div class="empty-state">
+      <div class="empty-icon" style="font-size:24px;opacity:.2">🔭</div>
+      Scanning …
+    </div>`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Render results
+// ─────────────────────────────────────────────────────────────────────────────
+function renderResults(data) {
+  const stats = data.stats || {};
+  document.getElementById('s-total').textContent = stats.total        || 0;
+  document.getElementById('s-uncat').textContent = stats.uncatalogued || 0;
+  document.getElementById('s-anom').textContent  = stats.anomalous    || 0;
+  document.getElementById('s-new').textContent   = stats.new_candidates || 0;
+  document.getElementById('stats-section').style.display = 'block';
+
+  if ((stats.new_candidates || 0) > 0) {
+    document.getElementById('discover-banner').style.display = 'block';
+  }
+
+  const results = data.results || [];
+  if (!results.length) {
+    document.getElementById('results-scroll').innerHTML = `
+      <div class="empty-state">No objects found in this field.</div>`;
+    return;
+  }
+
+  document.getElementById('results-scroll').innerHTML =
+    results.map(renderItem).join('');
+
+  // Drop markers on sky
+  if (aladin) plotOnSky(results);
+}
+
+function renderItem(r) {
+  const isNew  = !!r.is_new_candidate;
+  const isAnom = !!r.is_anomalous && !isNew;
+  const isSSO  = (r.type === 'asteroid' || r.type === 'comet') && !isNew;
+  const cls    = [isNew ? 'is-new' : '', isAnom ? 'is-anom' : '', isSSO ? 'is-sso' : ''].filter(Boolean).join(' ');
+  const tCls   = 't-' + (r.type || 'star');
+
+  const mag   = r.magnitude != null ? ` · mag ${r.magnitude.toFixed(1)}` : '';
+  const flags = (r.flags || []).map(f => {
+    const fc = f === 'NOT_IN_SIMBAD'          ? 'f-new'
+             : f === 'ML_ANOMALY'             ? 'f-anom'
+             : f === 'QSO_COLOR_CANDIDATE'    ? 'f-blue'
+             : f === 'HIGH_PROPER_MOTION'     ? 'f-anom'
+             : f === 'BLUE_OBJECT'            ? 'f-blue'
+             : f === 'PHA'                    ? 'f-pha'
+             : f === 'EARTH_CLOSE_APPROACH'   ? 'f-pha'
+             : f === 'KNOWN_SSO'              ? 'f-known'
+             : 'f-default';
+    return `<span class="flag ${fc}">${f.replace(/_/g,' ')}</span>`;
+  }).join('');
+
+  const noveltyLine = r.novelty_score > 0.5
+    ? `<div class="r-novelty">⭐ Novelty ${r.novelty_score.toFixed(2)}</div>` : '';
+
+  return `
+  <div class="result-item ${cls}" onclick="focusItem(${r.ra},${r.dec})">
+    <div class="r-head">
+      <div class="r-id" title="${r.id}">${r.id}</div>
+      <span class="r-type ${tCls}">${r.type}</span>
+    </div>
+    <div class="r-sub">RA ${r.ra.toFixed(4)}° / Dec ${r.dec.toFixed(4)}°${mag} · ${r.catalog || ''}</div>
+    ${noveltyLine}
+    <div class="r-flags">${flags}</div>
+  </div>`;
+}
+
+function focusItem(ra, dec) {
+  if (!aladin) return;
+  aladin.gotoRaDec(ra, dec);
+  aladin.setFov(0.04);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Plot results on Aladin sky
+// ─────────────────────────────────────────────────────────────────────────────
+function plotOnSky(results) {
+  const catNormal = A.catalog({ name:'Known',      color:'#60a5fa', shape:'circle',  sourceSize: 10 });
+  const catAnom   = A.catalog({ name:'Anomalous',  color:'#fbbf24', shape:'rhomb',   sourceSize: 14 });
+  const catNew    = A.catalog({ name:'New Cands',  color:'#34d399', shape:'cross',   sourceSize: 18 });
+  const catSSO    = A.catalog({ name:'Solar Sys',  color:'#fb923c', shape:'triangle',sourceSize: 12 });
+
+  for (const r of results) {
+    const title = r.id;
+    const desc  = `Type: ${r.type} | Catalog: ${r.catalog || '—'}` +
+                  (r.magnitude != null ? ` | Mag: ${r.magnitude.toFixed(1)}` : '') +
+                  (r.flags?.length ? `<br>Flags: ${r.flags.join(', ')}` : '');
+    const src = A.source(r.ra, r.dec, { popupTitle: title, popupDesc: desc });
+    if (r.is_new_candidate)          catNew.addSources([src]);
+    else if (r.is_anomalous)         catAnom.addSources([src]);
+    else if (r.type === 'asteroid'
+          || r.type === 'comet')     catSSO.addSources([src]);
+    else                             catNormal.addSources([src]);
+  }
+
+  [catNormal, catSSO, catAnom, catNew].forEach(c => aladin.addCatalog(c));
+}
+</script>
+</body>
+</html>
