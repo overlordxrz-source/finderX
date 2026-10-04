@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>finderX</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%230E1116'/%3E%3Cpath d='M8 2v4M8 10v4M2 8h4M10 8h4' stroke='%234C90F0' stroke-width='1.5'/%3E%3Ccircle cx='8' cy='8' r='1.5' fill='%2332A467'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://aladin.cds.unistra.fr/AladinLite/api/v3/latest/aladin.min.css">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div id="boot" class="boot" aria-hidden="true"><pre id="boot-text"></pre></div>
+
+<div class="app" id="app">
+  <!-- ── header ─────────────────────────────────────────────────── -->
+  <header class="hdr">
+    <div class="brand"><span class="brand-mark">◆</span> FINDERX <span class="brand-sub">DISCOVERY TERMINAL</span></div>
+    <div class="links" id="links" title="Archive links — live latency"></div>
+    <div class="hdr-stats">
+      <div class="hs"><span class="hs-k">EXAMINED</span><span class="hs-v" id="st-examined">0</span></div>
+      <div class="hs"><span class="hs-k">IN QUEUE</span><span class="hs-v" id="st-new">0</span></div>
+      <div class="hs"><span class="hs-k">CONFIRMED</span><span class="hs-v hs-green" id="st-confirmed">0</span></div>
+    </div>
+    <div class="clock" id="clock">--:--:-- UTC</div>
+  </header>
+
+  <!-- ── left rail ──────────────────────────────────────────────── -->
+  <aside class="rail" id="rail">
+    <section class="panel ops">
+      <div class="ph"><span>OPERATIONS</span></div>
+      <div class="engine-tabs" role="tablist">
+        <button class="et active" data-engine="transit" title="Exoplanet transits + variable stars in TESS light curves">EXO</button>
+        <button class="et" data-engine="stellar" title="Gaia DR3 stellar census">STARS</button>
+        <button class="et" data-engine="galaxy" title="Quasar / galaxy candidates (Gaia × WISE)">DEEP</button>
+        <button class="et" data-engine="solar" title="Live Solar System: NEOCP, close approaches, SkyBoT">SOLAR</button>
+      </div>
+      <form class="eform" id="eform" autocomplete="off"></form>
+      <div class="patrol" id="patrol">
+        <button class="btn btn-patrol" id="patrol-btn" type="button">
+          <span class="patrol-dot"></span><span id="patrol-label">START PATROL</span>
+        </button>
+        <div class="patrol-sub" id="patrol-sub">Blind survey of fresh TESS stars. Runs until you stop it; you vet what it flags.</div>
+      </div>
+    </section>
+
+    <section class="panel queue">
+      <div class="ph"><span>QUEUE</span><span class="ph-r" id="queue-count">0</span></div>
+      <div class="chips" id="status-chips">
+        <button class="chip active" data-status="new,flagged">TO VET</button>
+        <button class="chip" data-status="confirmed">CONFIRMED</button>
+        <button class="chip" data-status="rejected">REJECTED</button>
+        <button class="chip" data-status="">ALL</button>
+      </div>
+      <div class="chips chips-sub" id="engine-chips">
+        <button class="chip active" data-engine="">ANY</button>
+        <button class="chip" data-engine="transit">PLANET/EB</button>
+        <button class="chip" data-engine="variable">VAR</button>
+        <button class="chip" data-engine="stellar">STAR</button>
+        <button class="chip" data-engine="galaxy">DEEP</button>
+        <label class="chk"><input type="checkbox" id="show-known"> known</label>
+      </div>
+      <div class="qlist" id="qlist" tabindex="0"></div>
+    </section>
+  </aside>
+
+  <!-- ── workspace ──────────────────────────────────────────────── -->
+  <main class="work">
+    <nav class="views" id="views">
+      <button class="vt active" data-view="sky">SKY <kbd>1</kbd></button>
+      <button class="vt" data-view="signal">SIGNAL <kbd>2</kbd></button>
+      <button class="vt" data-view="field">FIELD <kbd>3</kbd></button>
+      <button class="vt" data-view="solar">SOLAR <kbd>4</kbd></button>
+      <button class="vt" data-view="log">DISCOVERIES <kbd>5</kbd></button>
+      <div class="views-r" id="view-tools"></div>
+    </nav>
+    <div class="stage">
+      <div class="view active" id="view-sky">
+        <div id="aladin" class="aladin"></div>
+        <canvas id="sky-fx" class="sky-fx"></canvas>
+        <div class="sky-hud">
+          <div id="sky-pos">RA — DEC —</div>
+          <div class="sky-surveys" id="sky-surveys"></div>
+        </div>
+        <div class="sky-legend">
+          <span><i class="lg lg-planet"></i>planet</span><span><i class="lg lg-eb"></i>eclipsing</span>
+          <span><i class="lg lg-var"></i>variable</span><span><i class="lg lg-star"></i>star</span>
+          <span><i class="lg lg-deep"></i>deep</span><span><i class="lg lg-sso"></i>solar sys</span>
+          <span><i class="lg lg-exam"></i>examined</span>
+        </div>
+        <div class="sky-fallback" id="sky-fallback" hidden>Sky atlas unavailable (Aladin Lite could not load). Everything else still works.</div>
+      </div>
+      <div class="view" id="view-signal">
+        <div class="empty" id="signal-empty">Select a planet, eclipsing-binary or variable candidate from the queue.</div>
+        <div class="sig" id="sig" hidden>
+          <div class="sig-row sig-top">
+            <div class="plot-box"><div class="plot-t">LIGHT CURVE · normalised flux vs BTJD<span id="pt-raw-r"></span></div><canvas id="p-raw"></canvas></div>
+          </div>
+          <div class="sig-row sig-mid">
+            <div class="plot-box"><div class="plot-t" id="pt-pgram">BLS PERIODOGRAM · SDE vs period (d)</div><canvas id="p-pgram"></canvas></div>
+            <div class="plot-box"><div class="plot-t" id="pt-fold">PHASE FOLD</div><canvas id="p-fold"></canvas></div>
+          </div>
+          <div class="sig-row sig-bot">
+            <div class="plot-box"><div class="plot-t" id="pt-zoom">TRANSIT ZOOM · odd <i class="sw sw-odd"></i> even <i class="sw sw-even"></i></div><canvas id="p-zoom"></canvas></div>
+            <div class="plot-box tests"><div class="plot-t">VETTING TESTS</div><div id="tests"></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="view" id="view-field">
+        <div class="empty" id="field-empty">Select a STARS or DEEP candidate to see it in context.</div>
+        <div class="plot-box field-box" id="field-box" hidden><div class="plot-t" id="pt-field"></div><canvas id="p-field"></canvas></div>
+      </div>
+      <div class="view" id="view-solar">
+        <div class="solar" id="solar"><div class="empty">Run SOLAR to load the NEO Confirmation Page, upcoming close approaches or a SkyBoT field census.</div></div>
+      </div>
+      <div class="view" id="view-log">
+        <div class="logv" id="logv"></div>
+      </div>
+      <div class="toasts" id="toasts"></div>
+    </div>
+  </main>
+
+  <!-- ── dossier ────────────────────────────────────────────────── -->
+  <aside class="dossier" id="dossier">
+    <div class="ph"><span>DOSSIER</span><span class="ph-r" id="d-id"></span></div>
+    <div class="d-body" id="d-body">
+      <div class="empty">No candidate selected.<br><br>Run an operation or start PATROL, then vet what turns up.<br><br><span class="dim">J / K move · C confirm · F flag · R reject · / console</span></div>
+    </div>
+  </aside>
+
+  <!-- ── console ────────────────────────────────────────────────── -->
+  <footer class="console">
+    <div class="pipe">
+      <div class="pipe-l"><span class="pipe-k">PIPELINE</span><div class="stages" id="stages"></div></div>
+      <div class="jobs" id="jobs"></div>
+    </div>
+    <div class="term">
+      <div class="log" id="log" role="log" aria-live="polite"></div>
+      <form class="prompt" id="prompt" autocomplete="off">
+        <span class="ps1">finderx&gt;</span><input id="cmd" spellcheck="false" placeholder="help · tic 261136679 · stars Hyades · deep 54 -62.5 · patrol · goto M87">
+        <div class="suggest" id="suggest" hidden></div>
+      </form>
+    </div>
+  </footer>
+</div>
+
+<div class="modal" id="modal" hidden>
+  <div class="modal-card">
+    <div class="ph"><span id="modal-title">REPORT</span><button class="x" id="modal-x" aria-label="Close">✕</button></div>
+    <pre id="modal-body"></pre>
+    <div class="modal-actions"><button class="btn" id="modal-copy">COPY</button></div>
+  </div>
+</div>
+
+<script src="https://aladin.cds.unistra.fr/AladinLite/api/v3/latest/aladin.js" charset="utf-8"></script>
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>
