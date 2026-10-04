@@ -89,8 +89,8 @@ def create_app(manager: JobManager | None = None) -> FastAPI:
         return {"job": jid, "results": m.db.results(jid)}
 
     @app.get("/api/candidates")
-    def candidates(status: str | None = None, engine: str | None = None, kind: str | None = None, limit: int = 400, include_known: bool = True):
-        rows = m.db.candidates(status=status, engine=engine, kind=kind, limit=limit)
+    def candidates(status: str | None = None, engine: str | None = None, kind: str | None = None, limit: int = 400, include_known: bool = True, order: str = "score"):
+        rows = m.db.candidates(status=status, engine=engine, kind=kind, limit=limit, order=order)
         if not include_known:
             rows = [r for r in rows if not r["kind"].startswith("known_")]
         return {"candidates": rows}

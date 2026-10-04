@@ -6,8 +6,20 @@ const SURVEYS = [
   ["2MASS", "P/2MASS/color"],
   ["WISE", "P/allWISE/color"],
   ["GAIA", "P/DM/flux-color-Rp-G-Bp/I/355/gaiadr3"],
-  ["MW", "P/Mellinger/color"],
 ];
+
+const ALADIN_JS = "https://aladin.cds.unistra.fr/AladinLite/api/v3/latest/aladin.js";
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const el = document.createElement("script");
+    el.src = src;
+    el.charset = "utf-8";
+    el.onload = resolve;
+    el.onerror = () => { el.remove(); reject(new Error("load failed: " + src)); };
+    document.head.appendChild(el);
+  });
+}
 
 const KIND_STYLE = {
   planet: { color: "#32a467", shape: "circle", size: 14 },
@@ -17,7 +29,7 @@ const KIND_STYLE = {
   deep: { color: "#a98fea", shape: "square", size: 11 },
   sso: { color: "#ff8a65", shape: "circle", size: 8 },
   neocp: { color: "#e76a6e", shape: "triangle", size: 12 },
-  exam: { color: "#5b6573", shape: "circle", size: 3 },
+  exam: { color: "#5b6573", shape: "circle", size: 6 },
 };
 
 export function kindGroup(c) {
@@ -45,7 +57,8 @@ export class Sky {
   }
 
   async init(surveysEl) {
-    if (!window.A) throw new Error("Aladin Lite missing");
+    for (let i = 0; !window.A && i < 3; i++) await loadScript(ALADIN_JS).catch(() => new Promise((r) => setTimeout(r, 1500 * (i + 1))));
+    if (!window.A) throw new Error("Aladin Lite could not be loaded");
     await window.A.init;
     this.a = window.A.aladin(this.el, {
       survey: SURVEYS[0][1], fov: 60, target: "83.82 -5.39", cooFrame: "ICRS",
@@ -65,19 +78,27 @@ export class Sky {
     this.a.on("objectClicked", (o) => { if (o?.data?.cid) this.onPick(o.data.cid); });
     this.a.on("positionChanged", () => this.updateHud());
     this.a.on("zoomChanged", () => this.updateHud());
-    surveysEl.innerHTML = SURVEYS.map(([n, id], i) => `<button data-s="${id}" class="${i ? "" : "on"}">${n}</button>`).join("");
+    surveysEl.innerHTML = SURVEYS.map(([n, id]) => `<button data-s="${id}">${n}</button>`).join("");
+    this.surveysEl = surveysEl;
+    this.mark(SURVEYS[0][1]);
     surveysEl.addEventListener("click", (e) => {
       const b = e.target.closest("button");
       if (!b) return;
       this.survey(b.dataset.s);
-      surveysEl.querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b));
     });
     this.updateHud();
   }
 
   survey(id) {
-    if (!this.a) return;
+    if (!this.a || id === this.current) return;
+    this.current = id;
+    this.mark(id);
     try { (this.a.setBaseImageLayer || this.a.setImageSurvey).call(this.a, id); } catch (e) { console.warn(e); }
+  }
+
+  mark(id) {
+    this.current = this.current || id;
+    this.surveysEl?.querySelectorAll("button").forEach((x) => x.classList.toggle("on", x.dataset.s === id));
   }
 
   updateHud() {
@@ -85,6 +106,14 @@ export class Sky {
     const [ra, dec] = this.a.getRaDec();
     const fov = this.a.getFov()[0];
     this.hud.textContent = `RA ${ra.toFixed(4)}°  DEC ${dec >= 0 ? "+" : ""}${dec.toFixed(4)}°  FOV ${fov >= 1 ? fov.toFixed(1) + "°" : (fov * 60).toFixed(1) + "′"}`;
+  }
+
+  // whole-sky Aitoff map: patrol pings land all over it
+  allsky() {
+    if (!this.a) return;
+    try { this.a.setProjection("AIT"); } catch { /* older Aladin */ }
+    this.a.setFoV(360);
+    this.a.gotoRaDec(0, 0);
   }
 
   goto(ra, dec, fov) {

@@ -222,8 +222,9 @@ def _process(ctx: JobContext, tic: int, products: list[dict], include_known: boo
 
     ctx.stage("DETREND", "run", label)
     f_in = f
-    if var and var.period < 2.0 and var.amplitude_ppm > 2000 and var.type_guess not in ("EB", "EW"):
-        f_in = A.prewhiten(t, f, var.period)
+    eclipsing_var = bool(var and var.type_guess in ("EA", "EB", "EW"))
+    if var and var.period < 2.0 and var.amplitude_ppm > 2000 and not eclipsing_var:
+        f_in = A.prewhiten(t, f, var.period, harmonics=6)
     trend = L.detrend(t, f_in, config.TRANSIT["detrend_window_d"])
     fd = f_in / trend
 
@@ -231,8 +232,17 @@ def _process(ctx: JobContext, tic: int, products: list[dict], include_known: boo
     signals, bls_pgram = A.transit_search(t, fd, star, cen, log=lambda m: ctx.log(f"{label} {m}", level="debug", src="BLS"))
 
     ctx.stage("VET", "run", label)
+    if var and not eclipsing_var:
+        # BLS hits at harmonics of a pulsation/rotation period are residuals of
+        # the prewhitening, not eclipses
+        residual = [s for s in signals if catalogs.period_match(s.period, var.period, 0.01)]
+        if residual:
+            ctx.log(f"{label} dropped {len(residual)} BLS peak(s) at harmonics of the {var.period:.4f} d variability", level="debug", src="VET")
+        signals = [s for s in signals if s not in residual]
+        for s in signals:
+            s.flags.append("VARIABLE_HOST")
     reportable = [s for s in signals if s.kind == "planet_candidate" or (s.kind == "eclipsing_binary" and s.snr >= 10)]
-    if var and any(s.kind == "eclipsing_binary" and catalogs.period_match(var.true_period, s.period, 0.02) for s in signals):
+    if eclipsing_var and any(s.kind == "eclipsing_binary" and catalogs.period_match(var.true_period, s.period, 0.02) for s in signals):
         var = None  # the EB itself; already reported by the transit search
 
     outcome = "quiet"
@@ -300,7 +310,12 @@ def _process(ctx: JobContext, tic: int, products: list[dict], include_known: boo
                 sig.score = max(0.0, sig.score - 0.15)
         kind = sig.kind
         if matched:
-            kind = "known_" + ("planet" if any(k["kind"] in ("planet", "toi", "ctoi") for k in matched) else "eb")
+            if any(k["kind"] in ("planet", "toi", "ctoi") for k in matched):
+                kind = "known_planet"
+            elif any(k["kind"] == "eb" or str(k.get("type", "")).startswith("E") for k in matched):
+                kind = "known_eb"
+            else:
+                kind = "known_variable"
         score = sig.score * (0.25 if matched else 1.0)
         rp = f" · {sig.rp_earth:.1f} R⊕" if sig.rp_earth else ""
         if not payload_saved:

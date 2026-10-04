@@ -22,7 +22,7 @@ const store = {
 
 const S = {
   cands: [],
-  filter: { status: "new,flagged", engine: "", known: store.get("known", false) },
+  filter: { status: "new,flagged", engine: "", known: store.get("known", false), order: store.get("order", "recent") },
   sel: null,
   detail: null,
   jobs: new Map(),
@@ -51,6 +51,7 @@ const FLAGS = {
   TESS_ORBIT_ALIAS: ["warn", "period close to TESS's 13.7-day orbit"],
   CROWDED_APERTURE: ["warn", "other stars contribute >20% of the aperture flux"],
   EVOLVED_HOST: ["warn", "host is a giant — its noise often mimics transits"],
+  VARIABLE_HOST: ["warn", "the star itself pulsates or rotates; the dip was found after removing that signal"],
   NEARBY_CONTAMINANT: ["warn", "a nearby Gaia star could produce this dip if it were an eclipsing binary"],
   VSX_ENTRY_LACKS_PERIOD: ["good", "VSX knows the star but has no period — you can add it"],
   NOT_IN_SIMBAD: ["good", "no SIMBAD entry at all"],
@@ -83,7 +84,7 @@ const KIND_LABEL = {
 
 // ── sky ──────────────────────────────────────────────────────────────
 const sky = new Sky($("#aladin"), $("#sky-fx"), $("#sky-pos"), $("#sky-surveys"), (cid) => select(cid));
-sky.ready.catch(() => { $("#sky-fallback").hidden = false; });
+sky.ready.catch((err) => { console.error("sky init failed", err); $("#sky-fallback").hidden = false; });
 
 // ── log console ──────────────────────────────────────────────────────
 const logEl = $("#log");
@@ -96,7 +97,7 @@ function logLine({ ts = Date.now() / 1000, src = "SYS", msg = "", level = "info"
   logEl.appendChild(d);
   while (logEl.childElementCount > 500) logEl.firstChild.remove();
   if (atBottom) logEl.scrollTop = logEl.scrollHeight;
-  if (cls === "sig") typeIn(d.querySelector(".m"));
+  if (cls === "hit") typeIn(d.querySelector(".m"));
 }
 function typeIn(el) {
   const full = el.textContent;
@@ -187,7 +188,10 @@ function handle(ev) {
   switch (ev.type) {
     case "hello":
       for (const r of (ev.recent || []).filter((e) => e.type === "log").slice(-60)) logLine(r);
-      for (const j of ev.running || []) { S.jobs.set(j.id, { ...j, progress: null }); if (j.params?.patrol) setPatrol(j.id); }
+      for (const j of ev.running || []) {
+        S.jobs.set(j.id, { ...j, progress: null });
+        if (j.params?.patrol) { setPatrol(j.id); sky.ready.then(() => sky.allsky()).catch(() => {}); }
+      }
       renderJobs();
       logLine({ src: "SYS", msg: "live stream connected", cls: "sys" });
       break;
@@ -229,7 +233,7 @@ function handle(ev) {
 
 function onCandidate(ev) {
   const known = ev.kind.startsWith("known_");
-  logLine({ ts: ev.ts, src: "SIGNAL", msg: `${ev.new ? "ACQUIRED" : "UPDATED"} ${ev.id} · ${KIND_LABEL[ev.kind] || ev.kind} · ${ev.title}`, cls: known ? "" : "sig" });
+  logLine({ ts: ev.ts, src: "SIGNAL", msg: `${ev.new ? "ACQUIRED" : "UPDATED"} ${ev.id} · ${KIND_LABEL[ev.kind] || ev.kind} · ${ev.title}`, cls: known ? "" : "hit" });
   if (ev.ra != null) sky.ping(ev.ra, ev.dec, known ? "#7d8796" : "#72ca9b");
   if (ev.new && !known) toast(ev);
   refreshQueueSoon();
@@ -425,13 +429,14 @@ $("#patrol-btn").addEventListener("click", async () => {
   try {
     const jid = await run("patrol", { n: 40 });
     setPatrol(jid);
-    sky.goto(sky.a?.getRaDec()[0] ?? 0, sky.a?.getRaDec()[1] ?? 0, 140);
+    setView("sky");
+    sky.allsky();
   } catch (err) { logLine({ src: "PATROL", msg: err.message, level: "error" }); }
 });
 
 // ── queue ────────────────────────────────────────────────────────────
 async function loadQueue() {
-  const q = new URLSearchParams({ limit: "500", include_known: S.filter.known ? "true" : "false" });
+  const q = new URLSearchParams({ limit: "500", include_known: S.filter.known ? "true" : "false", order: S.filter.order });
   if (S.filter.status) q.set("status", S.filter.status);
   if (S.filter.engine) q.set("engine", S.filter.engine);
   try {
@@ -453,7 +458,7 @@ function renderQueue(prev = new Set()) {
       <div class="qi-bar"></div>
       <div class="qi-t">${statusDot(c.status)}${esc(c.title)}</div>
       <div class="qi-r"><span class="qi-id">${c.id}</span><span class="score"><i style="width:${Math.round(c.score * 100)}%"></i></span></div>
-      <div class="qi-s">${esc(KIND_LABEL[c.kind] || c.kind)} · ${esc(c.subtitle)}</div>
+      <div class="qi-s">${c.engine === "transit" || c.engine === "variable" ? esc(KIND_LABEL[c.kind] || c.kind) + " · " : ""}${esc(c.subtitle)}</div>
     </div>`).join("");
 }
 const statusDot = (s) => (s === "new" ? "" : `<span class="st-dot" style="background:${{ confirmed: "var(--green)", rejected: "var(--red)", flagged: "var(--gold)" }[s]}"></span>`);
@@ -469,6 +474,8 @@ $("#engine-chips").addEventListener("click", (e) => {
   S.filter.engine = b.dataset.engine; loadQueue();
 });
 $("#show-known").checked = S.filter.known;
+$("#q-order").value = S.filter.order;
+$("#q-order").addEventListener("change", (e) => { S.filter.order = e.target.value; store.set("order", S.filter.order); loadQueue(); });
 $("#show-known").addEventListener("change", (e) => { S.filter.known = e.target.checked; store.set("known", S.filter.known); loadQueue(); });
 
 function move(d) {
@@ -629,7 +636,7 @@ async function vote(status) {
   const note = $("#d-note")?.value || null;
   try {
     await post(`/api/candidates/${id}/vote`, { status, note });
-    logLine({ src: "VET", msg: `${id} → ${status.toUpperCase()}${note ? " · “" + note + "”" : ""}`, cls: status === "confirmed" ? "sig" : "cmd" });
+    logLine({ src: "VET", msg: `${id} → ${status.toUpperCase()}${note ? " · “" + note + "”" : ""}`, cls: status === "confirmed" ? "hit" : "cmd" });
     const i = S.cands.findIndex((c) => c.id === id);
     const next = S.cands[i + 1] || S.cands[i - 1];
     if (S.filter.status && !S.filter.status.split(",").includes(status)) {
@@ -769,7 +776,7 @@ const COMMANDS = [
   ["solar [watch|neocp|approaches]", "live Solar System feeds"],
   ["solar field <target> [r=1]", "known asteroids/comets in a field now"],
   ["goto <target> [fov=1]", "point the sky atlas"],
-  ["survey dss|ps1|2mass|wise|gaia|mw", "change sky imagery"],
+  ["survey dss|ps1|2mass|wise|gaia", "change sky imagery"],
   ["open <id>", "open a candidate"],
   ["confirm|flag|reject [note]", "vet the open candidate"],
   ["queue tovet|confirmed|rejected|all", "filter the queue"],
@@ -819,7 +826,7 @@ async function exec(line) {
     case "goto": { const t = await target(text); setView("sky"); sky.lockOn(t.ra, t.dec); return sky.goto(t.ra, t.dec, +(opts.fov || 1)); }
     case "survey": {
       const b = $$("#sky-surveys button").find((x) => x.textContent.toLowerCase() === text.toLowerCase());
-      if (b) b.click(); else logLine({ src: "SKY", msg: "surveys: dss ps1 2mass wise gaia mw", level: "warn" });
+      if (b) b.click(); else logLine({ src: "SKY", msg: "surveys: dss ps1 2mass wise gaia", level: "warn" });
       return;
     }
     case "open": return select(text.toUpperCase());

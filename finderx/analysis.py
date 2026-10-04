@@ -419,17 +419,9 @@ def variability_search(t: np.ndarray, f: np.ndarray, star: Star | None = None, c
     except Exception:
         fap = float("nan")
 
-    ph = fold(tb, P, tb[0])
-    order = np.argsort(ph)
-    nb = 50
-    edges = np.linspace(-0.5, 0.5, nb + 1)
-    idx = np.clip(np.digitize(ph, edges) - 1, 0, nb - 1)
-    cnt = np.bincount(idx, minlength=nb)
-    prof = np.bincount(idx, weights=fb, minlength=nb) / np.maximum(cnt, 1)
-    prof = prof[cnt > 0]
+    _, prof = _profile(tb, fb, P, 50, tb[np.argmin(fb)])
     ptp = float(prof.max() - prof.min()) if len(prof) else 0.0
     skew = _skew(prof) if len(prof) > 5 else 0.0
-    del order
 
     detected = pw >= cfg["min_power"] and amp * 1e6 >= cfg["min_amp_ppm"] and amp >= cfg["min_amp_sigma"] * noise / math.sqrt(max(len(tb) / 50, 1))
     if not detected:
@@ -446,26 +438,55 @@ def _skew(x: np.ndarray) -> float:
     return float((x**3).mean() / s**3) if s > 0 else 0.0
 
 
+def _profile(t: np.ndarray, f: np.ndarray, P: float, nb: int, t0: float) -> tuple[np.ndarray, np.ndarray]:
+    """Phase-binned mean profile, phase 0 at t0; empty bins dropped."""
+    ph = fold(t, P, t0)
+    edges = np.linspace(-0.5, 0.5, nb + 1)
+    idx = np.clip(np.digitize(ph, edges) - 1, 0, nb - 1)
+    cnt = np.bincount(idx, minlength=nb)
+    prof = np.bincount(idx, weights=f, minlength=nb) / np.maximum(cnt, 1)
+    centers = 0.5 * (edges[1:] + edges[:-1])
+    return centers[cnt > 0], prof[cnt > 0]
+
+
+def _flat_fraction(prof: np.ndarray) -> float:
+    """Share of the cycle spent near maximum light (detached EBs ≫ pulsators)."""
+    if len(prof) < 5:
+        return 0.0
+    hi, lo = np.percentile(prof, 98), prof.min()
+    return float(np.mean(prof > hi - 0.15 * (hi - lo)))
+
+
 def _guess_type(P, amp, ptp, skew, star: Star, t, f) -> tuple[str, str, float]:
+    """Coarse VSX-style class from period, amplitude, shape and Teff."""
     teff = star.teff or 0
-    # Eclipsing/contact binaries: LS locks onto half the orbital period.
-    # Folding at 2P exposes unequal minima (EA/EB) or equal ones with
-    # sharper minima than maxima (EW).
-    p2 = 2 * P
-    ph = fold(t, p2, t[np.argmin(f)])
-    m1 = np.median(f[np.abs(ph) < 0.04]) if (np.abs(ph) < 0.04).sum() > 3 else np.nan
-    m2 = np.median(f[np.abs(np.abs(ph) - 0.5) < 0.04]) if (np.abs(np.abs(ph) - 0.5) < 0.04).sum() > 3 else np.nan
-    base = np.median(f)
-    if np.isfinite(m1) and np.isfinite(m2):
-        d1, d2 = base - m1, base - m2
-        if d1 > 0 and d2 > 0 and abs(d1 - d2) / max(d1, d2) > 0.15 and ptp > 0.004:
-            return "EB", "eclipsing binary (unequal minima)", p2
-        if P < 0.6 and skew < -0.35 and ptp > 0.003:
-            return "EW", "contact binary (W UMa type)", p2
+    t0 = t[np.argmin(f)]
+    _, p1 = _profile(t, f, P, 60, t0)
+    flat1 = _flat_fraction(p1)
+    # RRab: large amplitude, fast rise / slow decline, never flat
+    if 0.25 < P < 1.2 and ptp > 0.1 and skew > 0.25 and flat1 < 0.35:
+        return "RRAB", "RR Lyrae (fundamental mode) candidate", P
+
+    # Eclipses: fold at 2P — Lomb-Scargle often locks onto half the orbit
+    c2, p2 = _profile(t, f, 2 * P, 120, t0)
+    if len(p2) > 20:
+        base = np.percentile(p2, 90)
+        d1 = base - p2[np.abs(c2) < 0.04].min() if (np.abs(c2) < 0.04).any() else 0.0
+        d2 = base - p2[np.abs(np.abs(c2) - 0.5) < 0.04].min() if (np.abs(np.abs(c2) - 0.5) < 0.04).any() else 0.0
+        flat2 = _flat_fraction(p2)
+        if flat2 > 0.35 and d1 > 0.002:
+            if d2 > 0.08 * d1:
+                return "EA", "detached eclipsing binary", 2 * P
+            return "EA", "detached eclipsing binary (single eclipse per cycle)", P
+        # A cool dwarf cannot rotate or pulsate this fast with this amplitude:
+        # a short, near-sinusoidal signal there is a contact binary at 2P.
+        cool_fast = P < 0.5 and 0.2 <= 2 * P <= 1.0 and ptp > 0.005 and (not teff or teff < 6300)
+        if cool_fast or (P < 0.6 and skew < -0.3 and ptp > 0.003):
+            if d1 > 0 and d2 > 0 and abs(d1 - d2) / max(d1, d2) > 0.15:
+                return "EB", "β Lyrae-type eclipsing binary (unequal minima)", 2 * P
+            return "EW", "contact binary (W UMa type)", 2 * P
     if P < 0.3 and 6300 < teff < 9000:
         return "DSCT", "δ Scuti pulsator", P
-    if 0.3 <= P < 1.0 and ptp > 0.15 and skew > 0.3:
-        return "RR", "RR Lyrae candidate", P
     if 0.3 <= P < 3.5 and 6800 < teff < 7600:
         return "GDOR", "γ Doradus pulsator", P
     if teff and teff < 6500 and P >= 0.3:

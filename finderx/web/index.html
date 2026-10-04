@@ -8,7 +8,6 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="https://aladin.cds.unistra.fr/AladinLite/api/v3/latest/aladin.min.css">
 <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
@@ -47,7 +46,7 @@
     </section>
 
     <section class="panel queue">
-      <div class="ph"><span>QUEUE</span><span class="ph-r" id="queue-count">0</span></div>
+      <div class="ph"><span>QUEUE</span><span class="ph-r"><select id="q-order" class="q-order" title="sort"><option value="recent">NEWEST</option><option value="score">SCORE</option></select> <span id="queue-count">0</span></span></div>
       <div class="chips" id="status-chips">
         <button class="chip active" data-status="new,flagged">TO VET</button>
         <button class="chip" data-status="confirmed">CONFIRMED</button>

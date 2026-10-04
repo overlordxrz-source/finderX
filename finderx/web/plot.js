@@ -276,7 +276,7 @@ export async function drawSignal(cand, els) {
   const tlo = src.t[0], thi = src.t[src.t.length - 1];
   const xt = Float64Array.from(src.t, (t) => (t - tlo) / (thi - tlo) - 0.5);
   const fp = plots.fold.set({ x: [-0.5, 0.5], y: ylim(src.f, 0.002, 0.998, 0.15), yfmt: ppt, pad: [10, 12, 22, 46] });
-  els.titles.fold.innerHTML = `PHASE FOLD · <b>P ${P.toFixed(5)} d</b>`;
+  els.titles.fold.innerHTML = `<span>PHASE FOLD · <b>P ${P.toFixed(5)} d</b></span>`;
   const [bx, by] = binXY(ph, src.f, -0.5, 0.5, isVar ? 80 : 160);
   const xs = new Float64Array(src.t.length);
   const drawFold = (k) => {
@@ -319,7 +319,7 @@ export async function drawSignal(cand, els) {
     const [ex, ey] = binXY(even[0], even[1], -win, win, nb);
     const lo = Math.min(quantile(hy, 0.01), 1 - 1.4 * (m.depth || 0)), hi = quantile(hy, 0.995);
     zp.set({ x: [-win, win], y: [lo - (hi - lo) * 0.1, hi + (hi - lo) * 0.1], yfmt: ppt, pad: [10, 12, 22, 46] });
-    els.titles.zoom.innerHTML = `TRANSIT ZOOM · hours · odd <i class="sw sw-odd"></i> even <i class="sw sw-even"></i>`;
+    els.titles.zoom.innerHTML = `<span>TRANSIT ZOOM · hours from mid-transit · odd <i class="sw sw-odd"></i> even <i class="sw sw-even"></i></span>`;
     drawZoom = (k) => {
       zp.clear(); zp.axes();
       zp.points(hx, hy, { r: 1.1, alpha: 0.3 * ease(k) });
@@ -337,7 +337,7 @@ export async function drawSignal(cand, els) {
     const ys2 = Array.from(raw.f).concat(Array.from(raw.f));
     const [b2x, b2y] = binXY(xs2, ys2, 0, 2, 120);
     zp.set({ x: [0, 2], y: ylim(raw.f, 0.002, 0.998, 0.15), yfmt: ppt, pad: [10, 12, 22, 46] });
-    els.titles.zoom.innerHTML = `TWO CYCLES · <b>${m.type_guess}</b> · ${m.type_label}`;
+    els.titles.zoom.innerHTML = `<span>TWO CYCLES · <b>${m.type_guess}</b> · ${m.type_label}</span>`;
     drawZoom = (k) => {
       zp.clear(); zp.axes();
       zp.points(xs2, ys2, { r: 1, alpha: 0.25 * ease(k) });
@@ -399,7 +399,7 @@ export function drawField(cand, canvas, title, siblings = []) {
   const m = cand.metrics || {};
   if (cand.engine === "stellar" && pl.hr) {
     p.set({ x: [-0.6, 4.6], y: [-3, 18], invertY: true, pad: [12, 14, 26, 40] });
-    title.innerHTML = `HERTZSPRUNG–RUSSELL · M<sub>G</sub> vs BP−RP · <b>${pl.field.n.toLocaleString()} stars</b> in field`;
+    title.innerHTML = `<span>HERTZSPRUNG–RUSSELL · absolute G vs BP−RP · <b>${pl.field.n.toLocaleString()} Gaia stars</b> within ~1 kpc in this field</span>`;
     const bx = pl.hr.map((d) => d[0]), by = pl.hr.map((d) => d[1]);
     return animate(canvas, 900, (k) => {
       p.clear(); p.axes();
@@ -416,7 +416,7 @@ export function drawField(cand, canvas, title, siblings = []) {
   }
   if (cand.engine === "galaxy" && pl.wise) {
     p.set({ x: [-0.5, 6], y: [-0.6, 2.4], pad: [12, 14, 26, 40] });
-    title.innerHTML = `WISE COLOURS · W1−W2 vs W2−W3 · <b>${pl.wise.length.toLocaleString()} sources</b>`;
+    title.innerHTML = `<span>WISE COLOURS · W1−W2 vs W2−W3 · <b>${pl.wise.length.toLocaleString()} AllWISE sources</b> in this field</span>`;
     const bx = pl.wise.map((d) => d[0]), by = pl.wise.map((d) => d[1]);
     return animate(canvas, 900, (k) => {
       p.clear(); p.axes();
