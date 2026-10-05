@@ -23,6 +23,12 @@ STAGES = ["GAIA", "SELECT", "SIMBAD", "WD-CAT", "SCORE"]
 
 _COLS = 'Source, RA_ICRS, DE_ICRS, Plx, e_Plx, pmRA, pmDE, Gmag, "BP-RP", RUWE, RV, "E(BP/RP)"'
 _BINARY_TYPES = ("**", "SB*", "EB*", "El*", "*i*", "BD*")
+_NSS_TABLES = (
+    ("I/357/tbooc", "Gaia orbit"),
+    ("I/357/acc7", "Gaia acceleration"),
+    ("I/357/acc9", "Gaia acceleration"),
+    ("I/357/tbosb1", "Gaia SB1 orbit"),
+)
 
 
 def run(ctx: JobContext) -> dict:
@@ -120,6 +126,18 @@ def run(ctx: JobContext) -> dict:
             ctx.log(f"WD catalog X-Match failed: {exc}", level="warn", src="CDS")
         ctx.stage("WD-CAT", "ok")
 
+    # Gaia DR3 already fitted orbits/accelerations for some wobbling stars
+    nss: dict[int, str] = {}
+    hc_ids = [str(picks[i][0]["Source"]) for i, (_, tags, _) in enumerate(picks) if "HIDDEN_COMPANION" in tags]
+    if hc_ids:
+        for table, label in _NSS_TABLES:
+            try:
+                for row in net.tap(config.VIZIER_TAP, f'SELECT Source, NSSmodel FROM "{table}" WHERE Source IN ({",".join(hc_ids)})', timeout=60):
+                    nss[int(row["Source"])] = f"{label} ({str(row.get('NSSmodel') or '').strip()})"
+            except Exception as exc:
+                ctx.log(f"Gaia NSS {table} lookup failed: {exc}", level="warn", src="GAIA")
+        ctx.log(f"Gaia DR3 non-single-star solutions: {len(nss)}/{len(hc_ids)} wobbling stars already solved", src="GAIA")
+
     ctx.stage("SCORE", "run")
     pid = f"stellar:{ctx.id}"
     ctx.db.payload_put(pid, {"hr": hr_bg, "field": {"ra": ra, "dec": dec, "radius": radius, "n": len(rows)}})
@@ -129,7 +147,7 @@ def run(ctx: JobContext) -> dict:
         otype = (sb or {}).get("otype") or ""
         nbref = int((sb or {}).get("nbref") or 0)
         tags = list(tags)
-        if "HIDDEN_COMPANION" in tags and any(b in otype for b in _BINARY_TYPES):
+        if "HIDDEN_COMPANION" in tags and (any(b in otype for b in _BINARY_TYPES) or int(r["Source"]) in nss):
             tags.remove("HIDDEN_COMPANION")
         if "WHITE_DWARF" in tags and i in gf21 and sb:
             tags.remove("WHITE_DWARF")
