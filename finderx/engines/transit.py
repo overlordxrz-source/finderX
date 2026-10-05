@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import math
 import random
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -241,6 +242,19 @@ def _process(ctx: JobContext, tic: int, products: list[dict], include_known: boo
         signals = [s for s in signals if s not in residual]
         for s in signals:
             s.flags.append("VARIABLE_HOST")
+    # Common-mode check: dips that land at the same instants on unrelated
+    # stars of the same sector are spacecraft systematics, not eclipses.
+    if len(secs) == 1:
+        for s in signals:
+            s.transit_times = _transit_times(t, s)  # type: ignore[attr-defined]
+        for s in signals:
+            if _common_mode(ctx, secs[0], label, s.transit_times, s.duration):
+                s.flags.append("COMMON_MODE_SYSTEMATIC")
+                s.kind = "systematic"
+        with _register_lock:
+            for s in signals:
+                ctx.db.events_add(secs[0], label, s.transit_times)
+            _retro_common_mode(ctx, secs[0], label, signals)
     reportable = [s for s in signals if s.kind == "planet_candidate" or _solid_eb(s)]
     if eclipsing_var and any(s.kind == "eclipsing_binary" and catalogs.period_match(var.true_period, s.period, 0.02) for s in signals):
         var = None  # the EB itself; already reported by the transit search
@@ -278,7 +292,7 @@ def _process(ctx: JobContext, tic: int, products: list[dict], include_known: boo
         "tic": tic,
         "tmag": meta.get("tmag"),
         "teff": meta.get("teff"),
-        "radius": meta.get("radius"),
+        "radius": star.radius,
         "logg": meta.get("logg"),
         "mass": round(star.mass, 3) if star.mass else None,
         "crowdsap": meta.get("crowdsap"),
@@ -305,7 +319,7 @@ def _process(ctx: JobContext, tic: int, products: list[dict], include_known: boo
         contaminants = []
         if sig.kind == "planet_candidate" and meta.get("ra") is not None:
             contaminants = _contaminants(meta["ra"], meta["dec"], meta.get("tmag"), sig.depth)
-            if contaminants:
+            if any(n["sep_arcsec"] < config.TESS_PIXEL_ARCSEC and n["needed_depth"] < 0.3 for n in contaminants):
                 sig.flags.append("NEARBY_CONTAMINANT")
                 sig.score = max(0.0, sig.score - 0.15)
         kind = sig.kind
@@ -334,7 +348,7 @@ def _process(ctx: JobContext, tic: int, products: list[dict], include_known: boo
                 "score": round(score, 3),
                 "known": known,
                 "flags": sig.flags,
-                "metrics": {**sig.to_dict(), "orbital_period": round(shown_p, 7), "depth_ppm": round(sig.depth * 1e6, 1), "duration_h": round(sig.duration * 24, 3), "star": star_info, "contaminants": contaminants},
+                "metrics": {**sig.to_dict(), "transit_times": [round(x, 4) for x in getattr(sig, "transit_times", [])], "orbital_period": round(shown_p, 7), "depth_ppm": round(sig.depth * 1e6, 1), "duration_h": round(sig.duration * 24, 3), "star": star_info, "contaminants": contaminants},
             }
         )
         emitted += 1
@@ -379,6 +393,45 @@ def _process(ctx: JobContext, tic: int, products: list[dict], include_known: boo
 
     ctx.stage("XMATCH", "ok", label)
     ctx.mark(str(tic), outcome)
+
+
+_register_lock = threading.Lock()
+
+
+def _transit_times(t: np.ndarray, s: A.TransitSignal) -> list[float]:
+    """Mid-times of the events that actually have data."""
+    k0 = math.ceil((t[0] - s.t0) / s.period - 0.5)
+    out = []
+    for k in range(k0, k0 + int((t[-1] - t[0]) / s.period) + 2):
+        tm = s.t0 + k * s.period
+        if np.any(np.abs(t - tm) < 0.5 * s.duration):
+            out.append(float(tm))
+    return out
+
+
+def _common_mode(ctx: JobContext, sector: int, label: str, times: list[float], duration: float) -> bool:
+    if not times:
+        return False
+    tol = max(0.1, 0.5 * duration)
+    hits = sum(1 for tm in times if ctx.db.events_others(sector, label, tm, tol) >= 2)
+    return hits / len(times) >= 0.5
+
+
+def _retro_common_mode(ctx: JobContext, sector: int, label: str, signals: list) -> None:
+    """New events can expose earlier candidates in this sector as systematics."""
+    if not signals:
+        return
+    for c in ctx.db.candidates(engine="transit", status="new", limit=2000):
+        m = c.get("metrics") or {}
+        if c["target"] == label or c["kind"] in ("systematic",) or c["kind"].startswith("known_"):
+            continue
+        if (m.get("star") or {}).get("sectors") != [sector] or not m.get("transit_times"):
+            continue
+        if _common_mode(ctx, sector, c["target"], m["transit_times"], m.get("duration") or 0.1):
+            flags = list(c.get("flags") or []) + ["COMMON_MODE_SYSTEMATIC"]
+            ctx.db.candidate_reclassify(c["id"], "systematic", flags, 0.0)
+            ctx.log(f"{c['id']} {c['target']}: transits coincide with other stars in S{sector} — reclassified as systematic", src="VET")
+            ctx.emit("vote", id=c["id"], status="systematic")
 
 
 def _solid_eb(s: A.TransitSignal) -> bool:

@@ -33,6 +33,8 @@ CREATE TABLE IF NOT EXISTS payloads(id TEXT PRIMARY KEY, data BLOB);
 CREATE TABLE IF NOT EXISTS results(job TEXT, idx INTEGER, data TEXT);
 CREATE INDEX IF NOT EXISTS results_job ON results(job);
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS events(sector INTEGER, t REAL, target TEXT);
+CREATE INDEX IF NOT EXISTS events_st ON events(sector, t);
 """
 
 PREFIX = {"transit": "T", "variable": "V", "stellar": "S", "galaxy": "G", "solar": "A"}
@@ -178,6 +180,22 @@ class DB:
     def set_analyst_note(self, cid: str, text: str) -> bool:
         cur = self.x("UPDATE candidates SET analyst=?, updated=? WHERE id=?", (text, time.time(), cid))
         return cur.rowcount > 0
+
+    # ── transit-event register (common-mode systematics) ──────────────
+    def events_add(self, sector: int, target: str, times: list[float]) -> None:
+        with self._lock:
+            self._conn.executemany("INSERT INTO events(sector, t, target) VALUES(?,?,?)", [(sector, float(t), target) for t in times])
+
+    def events_others(self, sector: int, target: str, t: float, tol: float) -> int:
+        """Distinct *other* stars with a transit-like event within ±tol days."""
+        r = self.one(
+            "SELECT COUNT(DISTINCT target) AS n FROM events WHERE sector=? AND t BETWEEN ? AND ? AND target<>?",
+            (sector, t - tol, t + tol, target),
+        )
+        return int((r or {}).get("n") or 0)
+
+    def candidate_reclassify(self, cid: str, kind: str, flags: list[str], score: float) -> None:
+        self.x("UPDATE candidates SET kind=?, flags=?, score=?, updated=? WHERE id=?", (kind, json.dumps(flags), score, time.time(), cid))
 
     # ── payloads / results / meta ──────────────────────────────────────
     def payload_put(self, pid: str, data: dict) -> str:

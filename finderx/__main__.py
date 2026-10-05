@@ -129,7 +129,7 @@ def _table(rows: list[dict]) -> None:
 def cmd_queue(a) -> None:
     rows = dbmod.get().candidates(status=a.status, engine=a.engine, kind=a.kind, limit=a.limit)
     if not a.include_known:
-        rows = [r for r in rows if not r["kind"].startswith("known_")]
+        rows = [r for r in rows if not r["kind"].startswith("known_") and r["kind"] != "systematic"]
     if a.json:
         print(json.dumps(rows, default=str, indent=1))
     else:

@@ -91,3 +91,18 @@ def test_api_queue_vote_and_report():
     assert client.get("/api/resolve?q=TIC 261136679").json() == {"tic": 261136679}
     assert client.get("/api/resolve?q=83.8 -5.4").json()["dec"] == pytest.approx(-5.4)
     assert client.get("/").status_code == 200
+
+
+def test_common_mode_register_flags_shared_epochs():
+    from types import SimpleNamespace
+
+    from finderx.engines.transit import _common_mode
+
+    db = DB(":memory:")
+    ctx = SimpleNamespace(db=db)
+    for star in ("TIC 1", "TIC 2"):
+        db.events_add(103, star, [4153.20, 4159.10, 4165.00])
+    db.events_add(104, "TIC 3", [4153.20])  # other sector: must not count
+    assert _common_mode(ctx, 103, "TIC 9", [4153.25, 4159.05, 4170.0], 0.1)       # 2 of 3 coincide
+    assert not _common_mode(ctx, 103, "TIC 9", [4150.0, 4156.0, 4162.0], 0.1)
+    assert not _common_mode(ctx, 103, "TIC 1", [4153.20, 4159.10], 0.1)          # only one *other* star

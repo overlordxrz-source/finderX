@@ -51,6 +51,7 @@ const FLAGS = {
   TESS_ORBIT_ALIAS: ["warn", "period close to TESS's 13.7-day orbit"],
   CROWDED_APERTURE: ["warn", "other stars contribute >20% of the aperture flux"],
   EVOLVED_HOST: ["warn", "host is a giant — its noise often mimics transits"],
+  COMMON_MODE_SYSTEMATIC: ["bad", "other stars in this sector dip at the same instants — a spacecraft systematic"],
   VARIABLE_HOST: ["warn", "the star itself pulsates or rotates; the dip was found after removing that signal"],
   NEARBY_CONTAMINANT: ["warn", "a nearby Gaia star could produce this dip if it were an eclipsing binary"],
   VSX_ENTRY_LACKS_PERIOD: ["good", "VSX knows the star but has no period — you can add it"],
@@ -79,7 +80,7 @@ const KIND_LABEL = {
   variable: "variable star", known_variable: "known variable", high_velocity: "high velocity", nearby: "nearby star",
   hidden_companion: "hidden companion", ultracool: "ultracool dwarf", white_dwarf: "white dwarf",
   quasar: "quasar candidate", galaxy: "galaxy candidate", obscured_agn: "obscured AGN",
-  known_quasar: "known quasar", known_galaxy: "known galaxy", known_obscured_agn: "known AGN",
+  systematic: "systematic", known_quasar: "known quasar", known_galaxy: "known galaxy", known_obscured_agn: "known AGN",
 };
 
 // ── sky ──────────────────────────────────────────────────────────────
