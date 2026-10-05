@@ -55,6 +55,9 @@ const FLAGS = {
   SEEN_IN_SEVERAL_SECTORS: ["good", "the same transits recur in independent TESS sectors"],
   ONE_SECTOR_ONLY: ["warn", "all transits fall in one sector even though others were searched"],
   SINGLE_SECTOR_ONLY: ["warn", "TESS has observed this star in only one sector so far"],
+  ARCHIVE_CAUGHT_TARGET: ["good", "Pan-STARRS / Gaia caught the target itself dimmer during a predicted eclipse"],
+  ARCHIVE_CAUGHT_NEIGHBOUR: ["bad", "Pan-STARRS / Gaia caught a neighbouring star mid-eclipse — that star is the source"],
+  ARCHIVE_TARGET_EXCLUDED: ["bad", "the target was at full brightness in archival data during predicted eclipses"],
   PIXELS_ON_TARGET: ["good", "TESS difference image: the target star itself is dimming"],
   PIXELS_OFF_TARGET: ["bad", "TESS difference image: a neighbouring star is dimming, not the target"],
   PIXELS_AMBIGUOUS: ["warn", "TESS difference image cannot separate the target from a neighbour"],
@@ -695,7 +698,17 @@ function drawPixels(p, sector) {
   const rows = s.stars.slice(0, 8).map((st) => `<tr class="${st.is_target ? "t" : s.best && st.gaia === s.best.gaia ? "b" : ""}"><td>${st.is_target ? "target" : esc(st.gaia.slice(-6))}</td><td>${num(st.G, 1)}</td><td>${num(st.chi2, 0)}</td><td>${st.needed_depth < 1 ? (st.needed_depth * 100).toFixed(1) + "%" : "—"}</td></tr>`).join("");
   $("#pf-side").innerHTML = `<div class="pix-verdict" style="--vc:${color}"><b>S${s.sector} · ${label}</b><span>${esc(s.reason)}</span></div>
     <div class="hint" style="margin-bottom:8px">${s.n_events} events · peak SNR ${s.peak_snr}. Each Gaia star gets a PSF fit to the difference image; lowest χ² wins. "Needs" is the eclipse depth that star would need to produce the dip.</div>
-    <table><tr><th>STAR</th><th>G</th><th>χ²</th><th>NEEDS</th></tr>${rows}</table>`;
+    <table><tr><th>STAR</th><th>G</th><th>χ²</th><th>NEEDS</th></tr>${rows}</table>${archivalTable(p.archival)}`;
+}
+
+function archivalTable(a) {
+  if (!a) return "";
+  const color = { caught_on_target: "var(--green)", caught_on_neighbour: "var(--red)", target_ruled_out: "var(--red)", neighbours_excluded: "var(--gold)" }[a.verdict] || "var(--tx2)";
+  const rows = (a.stars || []).slice(0, 8).map((r) => `<tr class="${r.is_target ? "t" : r.status === "caught" ? "b" : ""}"><td>${r.is_target ? "target" : esc(r.id.split(" ").pop().slice(-6))}</td><td>${r.survey === "Pan-STARRS1" ? "PS1" : "Gaia"}</td><td>${r.n_in}</td><td>${num(r.dchi2, 0)}</td><td>${r.status}</td></tr>`).join("");
+  return `<div class="d-sh" style="padding:14px 0 6px">ARCHIVAL PHOTOMETRY · Pan-STARRS1 2010–14 · Gaia DR3 epochs</div>
+    <div class="pix-verdict" style="--vc:${color}"><b>${esc(a.verdict.replace(/_/g, " ").toUpperCase())}</b><span>${esc(a.reason)}</span></div>
+    ${rows ? `<div class="hint" style="margin:6px 0">Each star's old measurements folded on the TESS ephemeris. Δχ² &gt; 0: dimmer inside predicted eclipses, as its eclipse would require; &lt; 0: it stayed bright, so it is not the source.</div>
+    <table><tr><th>STAR</th><th>SURVEY</th><th>IN ECL.</th><th>Δχ²</th><th></th></tr>${rows}</table>` : ""}`;
 }
 
 function renderPixelField(c) {

@@ -172,3 +172,30 @@ def test_pixel_check_finds_the_dimming_neighbour():
     cut2 = {**cut, "flux": cube2}
     loc2 = px.locate(cut2, px.difference_image(cut2, P, t0, dur), stars, 1, float(ra_t), float(de_t), 0.01)
     assert loc2["verdict"] == "on_target"
+
+
+def test_archival_check_catches_the_eclipsing_neighbour(monkeypatch):
+    import numpy as np
+
+    from finderx import archival as ar
+
+    rng = np.random.default_rng(5)
+    P, t_ref, dur = 2.5, 3000.0, 0.12
+    t = np.sort(rng.uniform(-1800, -400, 400)) + t_ref       # sparse survey epochs years earlier
+    ph = ((t - t_ref) / P + 0.5) % 1 - 0.5
+    ecl = np.abs(ph * P) < dur / 2
+    def lc(name, ra, dec, f):
+        return {"survey": "Pan-STARRS1", "id": name, "ra": ra, "dec": dec, "t": t, "f": f, "e": np.full(t.size, 0.01)}
+    flat = 1 + rng.normal(0, 0.01, t.size)
+    lcs = {
+        "a": lc("PS1 target", 10.0, 0.0, flat.copy()),
+        "b": lc("PS1 nb", 10.0 + 20 / 3600, 0.0, np.where(ecl, 0.8, 1.0) + rng.normal(0, 0.01, t.size)),
+    }
+    monkeypatch.setattr(ar, "ps1_lightcurves", lambda ra, dec: lcs)
+    monkeypatch.setattr(ar, "gaia_epoch_lightcurves", lambda ra, dec: {})
+    stars = [{"Source": 1, "RA_ICRS": 10.0, "DE_ICRS": 0.0, "Gmag": 15.0},
+             {"Source": 2, "RA_ICRS": 10.0 + 20 / 3600, "DE_ICRS": 0.0, "Gmag": 16.5}]
+    depth = 0.2 * 10 ** (-0.4 * 1.5) / (1 + 10 ** (-0.4 * 1.5))
+    res = ar.check(10.0, 0.0, P, t_ref, dur, depth, stars, "1", 0.002, 1e-6)
+    assert res["verdict"] == "caught_on_neighbour"
+    assert res["stars"][0]["gaia"] == "2" and res["stars"][0]["n_in"] >= 3
