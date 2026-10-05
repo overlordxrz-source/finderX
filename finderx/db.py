@@ -184,6 +184,44 @@ class DB:
         cur = self.x("UPDATE candidates SET analyst=?, updated=? WHERE id=?", (text, time.time(), cid))
         return cur.rowcount > 0
 
+    # ── bundles: share a set of candidates (with plots and notes) ──────
+    def export_bundle(self, exclude_kinds: tuple[str, ...] = ("systematic",)) -> dict:
+        import base64
+
+        rows = [r for r in self.all("SELECT * FROM candidates ORDER BY seq") if r["kind"] not in exclude_kinds]
+        pids = {r["payload"] for r in rows if r.get("payload")}
+        payloads = {}
+        for pid in pids:
+            blob = self.one("SELECT data FROM payloads WHERE id=?", (pid,))
+            if blob:
+                payloads[pid] = base64.b64encode(blob["data"]).decode()
+        return {"format": "finderx-bundle/1", "candidates": rows, "payloads": payloads}
+
+    def import_bundle(self, bundle: dict) -> tuple[int, int]:
+        """Add a bundle's candidates; existing ones (same signal) are left alone."""
+        import base64
+
+        added = skipped = 0
+        cols = [c[1] for c in self._conn.execute("PRAGMA table_info(candidates)").fetchall()]
+        with self._lock:
+            for pid, b64 in bundle.get("payloads", {}).items():
+                self._conn.execute("INSERT OR IGNORE INTO payloads(id, data) VALUES(?,?)", (pid, base64.b64decode(b64)))
+            for r in bundle.get("candidates", []):
+                if self.has_candidate(r["dedupe"]):
+                    skipped += 1
+                    continue
+                r = {k: v for k, v in r.items() if k in cols}
+                if self.one("SELECT 1 AS x FROM candidates WHERE id=?", (r["id"],)):
+                    seq = ((self.one("SELECT MAX(seq) AS m FROM candidates") or {}).get("m") or 0) + 1
+                    r["seq"] = seq
+                    r["id"] = r["id"].split("-")[0] + f"-{seq:04d}"
+                keys = list(r)
+                self._conn.execute(
+                    f"INSERT INTO candidates({','.join(keys)}) VALUES({','.join('?' * len(keys))})", tuple(r[k] for k in keys)
+                )
+                added += 1
+        return added, skipped
+
     # ── transit-event register (common-mode systematics) ──────────────
     def events_add(self, sector: int, target: str, times: list[float]) -> None:
         with self._lock:

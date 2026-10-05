@@ -14,6 +14,13 @@ make the calls.
 
 Python 3.10+. No API keys. Everything is public data.
 
+The first start loads **[first light](docs/FIRST_LIGHT.md)**: the
+candidates from the survey run while finderX was being built (809 TESS
+stars, three Gaia fields, two deep fields), with light curves and analyst
+notes attached. They include a hot-Jupiter candidate seen in four sectors,
+11 eclipsing binaries no catalogue lists, and a VSX correction ready to
+submit. Nothing has been voted on yet; that part is yours.
+
 ---
 
 ## What you can find
@@ -21,7 +28,7 @@ Python 3.10+. No API keys. Everything is public data.
 | Engine | Data | What it hunts | Where a real one goes |
 |---|---|---|---|
 | **EXO** | TESS light curves (SPOC 2-min, TESS-SPOC & QLP full-frame) via MAST | Transiting planets, eclipsing binaries, periodic variable stars | Planets → ExoFOP **CTOI**. Variables & EBs → AAVSO **VSX** |
-| **STARS** | Gaia DR3 (VizieR mirror) × SIMBAD × Gentile Fusillo+21 | High-velocity halo/runaway stars, unstudied stars within 50 pc, hidden companions (RUWE > 2), ultracool dwarfs, white dwarfs nobody has catalogued | Literature / research note |
+| **STARS** | Gaia DR3 (VizieR mirror) × SIMBAD × Gentile Fusillo+21 × Gaia DR3 orbit solutions | High-velocity halo/runaway stars, unstudied stars within 50 pc, hidden companions (RUWE > 2), ultracool dwarfs, white dwarfs nobody has catalogued | Literature / research note |
 | **DEEP** | Gaia DR3 QSO & galaxy classifier × AllWISE × Milliquas × Quaia × SIMBAD × NED | Quasar candidates with no spectroscopic classification (strongest when Gaia, WISE colours and zero motion all agree), dust-obscured AGN, uncatalogued galaxies | Spectroscopic follow-up lists |
 | **SOLAR** | MPC NEO Confirmation Page, JPL close-approach API, IMCCE SkyBoT | Newly found objects still awaiting confirmation, upcoming close approaches, every known asteroid in a field with its motion | Watch only — see *Honest limits* |
 
@@ -49,12 +56,18 @@ pass / warn / fail state and a one-line explanation:
 - implied radius, single-event dominance, proximity to data gaps
 - centroid shift during transit, and **every Gaia neighbour within two TESS
   pixels bright enough to fake the dip** if it were an eclipsing binary
+- **multi-sector re-check**: a planet-like signal from one sector is
+  automatically re-searched with up to three more sectors of the same
+  star. Noise does not repeat, and the longer baseline often reveals an
+  eclipsing binary at its true period. In the first-light run this cut
+  10 single-sector candidates to 1 survivor and 3 binaries.
 - **common-mode systematics**: every event's mid-time goes into a per-sector
   register; a "transit" that lands at the same instants as dips on other,
   unrelated stars is the spacecraft, not a planet, and is filed away
   (retroactively too, as the register fills up)
 - catalogue cross-match: TOI, CTOI, NASA Exoplanet Archive, TESS EB catalogue,
-  VSX, Gaia DR3 variability
+  VSX, Gaia DR3 variability and eclipsing-binary periods (searched within one
+  TESS pixel, because a blended neighbour is often the real source)
 
 Then you press **C** (confirm), **F** (flag) or **R** (reject). Confirmed
 candidates collect in **DISCOVERIES**; **REPORT** produces the
@@ -64,6 +77,13 @@ STARS candidates get a Hertzsprung–Russell diagram of their field and a
 **blink comparator** (1990s photographic plate vs. Pan-STARRS) so you can
 watch a high-proper-motion star move. DEEP candidates get the WISE
 colour–colour diagram with the AGN line and Legacy Surveys imaging.
+
+| | |
+|---|---|
+| ![patrol](docs/screenshots/patrol.png) | ![eclipsing binary](docs/screenshots/eclipsing-binary.png) |
+| PATROL on the all-sky map: every ring is a star being searched | a new detached eclipsing binary from the first run |
+| ![field](docs/screenshots/field.png) | ![solar](docs/screenshots/solar.png) |
+| a 620 km/s halo star on its field's HR diagram | live NEO Confirmation Page |
 
 ## The terminal
 
@@ -111,6 +131,8 @@ in the UI's queue:
 .venv/bin/python -m finderx show FXT-0012
 .venv/bin/python -m finderx note FXT-0012 "centroid clean; neighbour 9″ away could still be it"
 .venv/bin/python -m finderx export --status confirmed --format csv
+.venv/bin/python -m finderx bundle --out mine.json.gz       # share candidates + plots + notes
+.venv/bin/python -m finderx import docs/first-light.json.gz
 ```
 
 `CLAUDE.md` tells a Claude Code session how to drive surveys and triage the

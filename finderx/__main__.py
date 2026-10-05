@@ -13,6 +13,8 @@
   python -m finderx note FXT-0001 "analyst text"  # notes from an agent / reviewer
   python -m finderx report FXT-0001
   python -m finderx export --status confirmed --format csv
+  python -m finderx bundle --out mine.json.gz     # share candidates with plots + notes
+  python -m finderx import docs/first-light.json.gz
 """
 
 from __future__ import annotations
@@ -177,6 +179,24 @@ def cmd_export(a) -> None:
         sys.stdout.write(out)
 
 
+def cmd_bundle(a) -> None:
+    import gzip
+
+    b = dbmod.get().export_bundle()
+    with gzip.open(a.out, "wt") as fh:
+        json.dump(b, fh, default=str)
+    print(f"wrote {len(b['candidates'])} candidates ({len(b['payloads'])} light-curve payloads) to {a.out}")
+
+
+def cmd_import(a) -> None:
+    import gzip
+
+    opener = gzip.open if a.path.endswith(".gz") else open
+    with opener(a.path, "rt") as fh:
+        added, skipped = dbmod.get().import_bundle(json.load(fh))
+    print(f"imported {added} candidates ({skipped} already present)")
+
+
 def cmd_stats(a) -> None:
     print(json.dumps(dbmod.get().stats(), indent=1))
 
@@ -266,6 +286,14 @@ def main(argv=None) -> None:
     s.add_argument("--format", choices=["csv", "json"], default="csv")
     s.add_argument("--out")
     s.set_defaults(fn=cmd_export)
+
+    s = sub.add_parser("bundle", help="export candidates + plots + notes to share")
+    s.add_argument("--out", default="finderx-bundle.json.gz")
+    s.set_defaults(fn=cmd_bundle)
+
+    s = sub.add_parser("import", help="load a candidate bundle into your queue")
+    s.add_argument("path")
+    s.set_defaults(fn=cmd_import)
 
     s = sub.add_parser("stats")
     s.set_defaults(fn=cmd_stats)

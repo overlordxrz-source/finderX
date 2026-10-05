@@ -188,7 +188,7 @@ def _run_many(ctx: JobContext, jobs: list[tuple[int, list[dict]]], workers: int,
 
 # ── per-star pipeline ──────────────────────────────────────────────────────
 
-def _process(ctx: JobContext, tic: int, products: list[dict], include_known: bool = False) -> None:
+def _process(ctx: JobContext, tic: int, products: list[dict], include_known: bool = False, deep: bool = False) -> None:
     ctx.check()
     label = f"TIC {tic}"
     ctx.stage("FETCH", "run", label)
@@ -196,6 +196,8 @@ def _process(ctx: JobContext, tic: int, products: list[dict], include_known: boo
     for prod in products:
         try:
             lcs.append(L.fetch(prod, cache=include_known))  # keep files only for targeted looks
+        except ValueError as exc:  # unusable light curve, not a network problem
+            ctx.log(f"{label} S{prod.get('sequence_number')}: skipped — {exc}", level="debug", src="CLEAN")
         except Exception as exc:
             ctx.log(f"{label} S{prod.get('sequence_number')}: download failed ({exc})", level="warn", src="MAST")
     if not lcs:
@@ -244,9 +246,9 @@ def _process(ctx: JobContext, tic: int, products: list[dict], include_known: boo
             s.flags.append("VARIABLE_HOST")
     # Common-mode check: dips that land at the same instants on unrelated
     # stars of the same sector are spacecraft systematics, not eclipses.
+    for s in signals:
+        s.transit_times = _transit_times(t, s)  # type: ignore[attr-defined]
     if len(secs) == 1:
-        for s in signals:
-            s.transit_times = _transit_times(t, s)  # type: ignore[attr-defined]
         for s in signals:
             if _common_mode(ctx, secs[0], label, s.transit_times, s.duration):
                 s.flags.append("COMMON_MODE_SYSTEMATIC")
@@ -258,6 +260,34 @@ def _process(ctx: JobContext, tic: int, products: list[dict], include_known: boo
     reportable = [s for s in signals if s.kind == "planet_candidate" or _solid_eb(s)]
     if eclipsing_var and any(s.kind == "eclipsing_binary" and catalogs.period_match(var.true_period, s.period, 0.02) for s in signals):
         var = None  # the EB itself; already reported by the transit search
+
+    # A planet-like signal from one sector must survive a search over the
+    # star's other sectors: noise does not repeat, and the longer baseline
+    # often exposes an eclipsing binary at its true period.
+    if not include_known and not deep and len(secs) == 1 and any(s.kind == "planet_candidate" for s in reportable):
+        try:
+            others = [p for p in L.products_for_tic(tic) if p.get("sequence_number") not in secs][:3]
+        except Exception as exc:
+            others = []
+            ctx.log(f"{label} could not list other sectors ({exc})", level="warn", src="MAST")
+        if others:
+            ctx.log(f"{label} planet-like signal in S{secs[0]} — re-searching with " + ", ".join(f"S{p['sequence_number']}" for p in others), src="VET")
+            return _process(ctx, tic, products + others, include_known=False, deep=True)
+        for s in reportable:
+            if s.kind == "planet_candidate":
+                s.flags.append("SINGLE_SECTOR_ONLY")
+    if len(secs) > 1:
+        ranges = [(lc_.sector, lc_.time[0], lc_.time[-1]) for lc_ in lcs]
+        for s in reportable:
+            hit = sorted({sec for sec, a, b in ranges for tm in s.transit_times if a - 0.1 <= tm <= b + 0.1})
+            s.transit_sectors = hit  # type: ignore[attr-defined]
+            if s.kind == "planet_candidate":
+                if len(hit) >= 2:
+                    s.flags.append("SEEN_IN_SEVERAL_SECTORS")
+                    s.score = min(1.0, s.score + 0.3)
+                else:
+                    s.flags.append("ONE_SECTOR_ONLY")
+                    s.score = max(0.0, s.score - 0.2)
 
     outcome = "quiet"
     if not reportable and not var:
@@ -274,9 +304,14 @@ def _process(ctx: JobContext, tic: int, products: list[dict], include_known: boo
             vsx = catalogs.vsx_cone(meta["ra"], meta["dec"])
         except Exception as exc:
             ctx.log(f"{label} VSX lookup failed ({exc})", level="warn", src="CDS")
-        if var:
+        if var or any(s_.kind == "eclipsing_binary" for s_ in reportable):
             try:
-                gaia_var = catalogs.gaia_variability_cone(meta["ra"], meta["dec"], 10)
+                # one TESS pixel: a blended neighbour's variability lands in our aperture
+                gaia_var = catalogs.gaia_variability_cone(meta["ra"], meta["dec"], config.TESS_PIXEL_ARCSEC)
+                ecl = [g["Source"] for g in gaia_var if str(g.get("Class", "")).startswith("ECL")]
+                periods = catalogs.gaia_eb_periods(ecl) if ecl else {}
+                for g in gaia_var:
+                    g["Period"] = periods.get(int(g["Source"]))
             except Exception:
                 pass
 
@@ -313,8 +348,13 @@ def _process(ctx: JobContext, tic: int, products: list[dict], include_known: boo
             rel = catalogs.period_match(sig.period, v.get("Period"), 0.01)
             if rel or "E" in str(v.get("Type", "")):
                 known.append({"kind": "vsx", "label": str(v.get("Name", "")).strip(), "type": str(v.get("Type", "")).strip(), "period": v.get("Period"), "match": rel})
+        if sig.kind == "eclipsing_binary":
+            for g in gaia_var:
+                if str(g.get("Class", "")).startswith("ECL"):
+                    rel = catalogs.period_match(sig.period, g.get("Period"), 0.01) if g.get("Period") else None
+                    known.append({"kind": "gaia_var", "label": f"Gaia DR3 {g.get('Source')}", "type": "ECL", "period": g.get("Period"), "match": rel or (None if g.get("Period") else "position")})
         matched = [k for k in known if k.get("match")]
-        if not include_known and matched:
+        if not include_known and matched and not ctx.db.has_candidate(f"transit:{tic}:{sig.kind}:{sig.period:.3f}"):
             continue
         contaminants = []
         if sig.kind == "planet_candidate" and meta.get("ra") is not None:
@@ -348,7 +388,7 @@ def _process(ctx: JobContext, tic: int, products: list[dict], include_known: boo
                 "score": round(score, 3),
                 "known": known,
                 "flags": sig.flags,
-                "metrics": {**sig.to_dict(), "transit_times": [round(x, 4) for x in getattr(sig, "transit_times", [])], "orbital_period": round(shown_p, 7), "depth_ppm": round(sig.depth * 1e6, 1), "duration_h": round(sig.duration * 24, 3), "star": star_info, "contaminants": contaminants},
+                "metrics": {**sig.to_dict(), "transit_times": [round(x, 4) for x in getattr(sig, "transit_times", [])], "transit_sectors": getattr(sig, "transit_sectors", secs), "orbital_period": round(shown_p, 7), "depth_ppm": round(sig.depth * 1e6, 1), "duration_h": round(sig.duration * 24, 3), "star": star_info, "contaminants": contaminants},
             }
         )
         emitted += 1
@@ -363,7 +403,9 @@ def _process(ctx: JobContext, tic: int, products: list[dict], include_known: boo
             rel = catalogs.period_match(var.true_period, v.get("Period"), 0.02) or catalogs.period_match(var.period, v.get("Period"), 0.02)
             known.append({"kind": "vsx", "label": str(v.get("Name", "")).strip(), "type": str(v.get("Type", "")).strip(), "period": v.get("Period"), "match": rel or ("no-period" if not v.get("Period") else None)})
         for g in gaia_var:
-            known.append({"kind": "gaia_var", "label": f"Gaia DR3 {g.get('Source')}", "type": g.get("Class"), "period": None, "match": "position"})
+            gp = g.get("Period")
+            rel = (catalogs.period_match(var.true_period, gp, 0.01) or catalogs.period_match(var.period, gp, 0.01)) if gp else None
+            known.append({"kind": "gaia_var", "label": f"Gaia DR3 {g.get('Source')}", "type": g.get("Class"), "period": gp, "match": rel or (None if gp else "position")})
         matched = [k for k in known if k.get("match") and k.get("match") != "no-period"]
         if include_known or not matched:
             flags = []

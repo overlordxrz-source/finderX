@@ -484,7 +484,7 @@ def _guess_type(P, amp, ptp, skew, star: Star, t, f) -> tuple[str, str, float]:
         d1 = base - p2[np.abs(c2) < 0.04].min() if (np.abs(c2) < 0.04).any() else 0.0
         d2 = base - p2[np.abs(np.abs(c2) - 0.5) < 0.04].min() if (np.abs(np.abs(c2) - 0.5) < 0.04).any() else 0.0
         flat2 = _flat_fraction(p2)
-        if flat2 > 0.35 and d1 > 0.002:
+        if flat2 > 0.5 and d1 > 0.002:
             if d2 > 0.08 * d1:
                 return "EA", "detached eclipsing binary", 2 * P
             return "EA", "detached eclipsing binary (single eclipse per cycle)", P

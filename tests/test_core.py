@@ -106,3 +106,22 @@ def test_common_mode_register_flags_shared_epochs():
     assert _common_mode(ctx, 103, "TIC 9", [4153.25, 4159.05, 4170.0], 0.1)       # 2 of 3 coincide
     assert not _common_mode(ctx, 103, "TIC 9", [4150.0, 4156.0, 4162.0], 0.1)
     assert not _common_mode(ctx, 103, "TIC 1", [4153.20, 4159.10], 0.1)          # only one *other* star
+
+
+def test_bundle_roundtrip_keeps_plots_and_notes():
+    src = DB(":memory:")
+    cid, _ = src.candidate_upsert(cand(payload="p1"))
+    src.payload_put("p1", {"raw": {"t": [1.0], "f": [1.0]}})
+    src.set_analyst_note(cid, "looks real")
+    src.candidate_upsert(cand(kind="systematic", dedupe="transit:2:sys:1.000", target="TIC 2"))
+    bundle = src.export_bundle()
+    assert len(bundle["candidates"]) == 1  # systematics stay home
+
+    dst = DB(":memory:")
+    dst.candidate_upsert(cand(dedupe="other", target="TIC 3"))  # occupies FXT-0001
+    assert dst.import_bundle(bundle) == (1, 0)
+    assert dst.import_bundle(bundle) == (0, 1)
+    got = [c for c in dst.candidates() if c["target"] == "TIC 1"][0]
+    full = dst.candidate(got["id"])
+    assert full["analyst"] == "looks real" and full["plots"]["raw"]["f"] == [1.0]
+    assert got["id"] != "FXT-0001"

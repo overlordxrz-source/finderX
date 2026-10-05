@@ -174,3 +174,12 @@ def gaia_variability_cone(ra: float, dec: float, radius_arcsec: float = config.T
         f"WHERE {net.cone('RA_ICRS', 'DE_ICRS', ra, dec, radius_arcsec / 3600)}"
     )
     return net.tap(config.VIZIER_TAP, q, timeout=40)
+
+
+def gaia_eb_periods(source_ids: list) -> dict[int, float]:
+    """Orbital periods from the Gaia DR3 eclipsing-binary catalogue."""
+    ids = ",".join(str(int(x)) for x in source_ids if x)
+    if not ids:
+        return {}
+    rows = net.tap(config.VIZIER_TAP, f'SELECT Source, Freq FROM "I/358/veb" WHERE Source IN ({ids})', timeout=40)
+    return {int(r["Source"]): 1.0 / r["Freq"] for r in rows if r.get("Freq")}

@@ -387,6 +387,8 @@ export function tests(cand) {
   add(m.rp_earth == null ? "na" : m.rp_earth < 16 ? "ok" : m.rp_earth < 24 ? "warn" : "bad", "implied radius", m.rp_earth == null ? "—" : `${m.rp_earth.toFixed(1)} R⊕`, "> 2 R♃ cannot be a planet");
   add(m.single_event_frac < 0.5 ? "ok" : m.single_event_frac < 0.65 ? "warn" : "bad", "single-event dominance", m.single_event_frac?.toFixed(2), "share of the signal carried by one event");
   add(m.edge_frac < 0.3 ? "ok" : m.edge_frac < 0.5 ? "warn" : "bad", "near data gaps", m.edge_frac?.toFixed(2), "systematics cluster at orbit edges");
+  const ts = m.transit_sectors || [];
+  add(ts.length >= 2 ? "ok" : "warn", "sectors with transits", ts.length ? ts.map((x) => "S" + x).join(" ") : "—", "a real planet transits in every sector that covers it");
   const nc = (m.contaminants || []).length;
   add(nc ? "warn" : "ok", "contaminating neighbours", nc, "Gaia stars within 2 TESS pixels bright enough to fake the dip");
   return rows;

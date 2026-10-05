@@ -52,6 +52,9 @@ const FLAGS = {
   CROWDED_APERTURE: ["warn", "other stars contribute >20% of the aperture flux"],
   EVOLVED_HOST: ["warn", "host is a giant — its noise often mimics transits"],
   COMMON_MODE_SYSTEMATIC: ["bad", "other stars in this sector dip at the same instants — a spacecraft systematic"],
+  SEEN_IN_SEVERAL_SECTORS: ["good", "the same transits recur in independent TESS sectors"],
+  ONE_SECTOR_ONLY: ["warn", "all transits fall in one sector even though others were searched"],
+  SINGLE_SECTOR_ONLY: ["warn", "TESS has observed this star in only one sector so far"],
   VARIABLE_HOST: ["warn", "the star itself pulsates or rotates; the dip was found after removing that signal"],
   NEARBY_CONTAMINANT: ["warn", "a nearby Gaia star could produce this dip if it were an eclipsing binary"],
   VSX_ENTRY_LACKS_PERIOD: ["good", "VSX knows the star but has no period — you can add it"],
@@ -708,7 +711,7 @@ function setView(v) {
   $("#view-tools").innerHTML = v === "signal" && S.detail ? `<button class="btn" id="vt-replay">▶ REPLAY <kbd>SPACE</kbd></button>` : "";
   $("#vt-replay")?.addEventListener("click", () => S.sig?.replay());
   if (v === "signal" && S.sig?.pending) { const c = S.sig.pending; S.sig.pending = null; requestAnimationFrame(() => drawSignal(c, S.sig)); }
-  else if (v === "signal" && S.sig?.redraw) requestAnimationFrame(() => S.sig.redraw());
+  else if (v === "signal" && S.sig?.redraw) { const sig = S.sig; requestAnimationFrame(() => sig.redraw?.()); }
   if (v === "field" && S.fieldPending) requestAnimationFrame(() => drawField(S.fieldPending, $("#p-field"), $("#pt-field"), S.cands.filter((x) => x.job === S.fieldPending.job)));
   if (v === "solar") renderSolar();
   if (v === "log") renderLog();
@@ -812,7 +815,9 @@ async function exec(line) {
     case "patrol":
       if (text === "stop") { if (S.patrol) await post(`/api/jobs/${S.patrol}/cancel`, {}); return; }
       if (S.patrol) return logLine({ src: "PATROL", msg: "already patrolling (patrol stop to end)" });
-      return setPatrol(await run("patrol", { n: +(opts.n || 40) }));
+      setPatrol(await run("patrol", { n: +(opts.n || 40) }));
+      setView("sky");
+      return sky.allsky();
     case "stars": case "deep": {
       const t = await target(text);
       return run(cmd === "stars" ? "stellar" : "galaxy", { ra: t.ra, dec: t.dec, radius: +(opts.r || (cmd === "stars" ? 1 : 0.5)) });

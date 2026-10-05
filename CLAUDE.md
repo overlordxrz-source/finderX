@@ -34,6 +34,12 @@ is a known TOI, CTOI, confirmed-planet host or TESS-EB-catalog star.
 If the owner's server is running, CLI results land in the same database
 and appear in their queue on the next refresh.
 
+Single-sector planet candidates are automatically re-searched over up to
+three more sectors (`deep` pass in `engines/transit.py`) before they reach
+the queue. `docs/FIRST_LIGHT.md` documents the first survey and what it
+taught the pipeline; `python -m finderx bundle/import` moves candidates
+(with plots and notes) between databases.
+
 ## Triage protocol
 
 ```bash
