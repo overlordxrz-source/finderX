@@ -205,6 +205,9 @@ def transit_search(
         pos = ll[ll > 0].sum()
         single_frac = float(ll.max() / pos) if pos > 0 else 1.0
 
+        if any(_same_period(P, prev.period) for prev in signals):
+            log(f"signal {idx + 1}: P={P:.4f} d repeats an earlier signal — stopping")
+            break
         if sde < cfg["sde_threshold"] or snr < cfg["snr_threshold"] or n_tr < cfg["min_transits"] or depth <= 0:
             log(f"signal {idx + 1}: none above threshold (SDE {sde:.1f}, SNR {snr:.1f})")
             break
@@ -256,6 +259,11 @@ def transit_search(
         if keep.sum() < 200:
             break
     return signals, periodogram
+
+
+def _same_period(p: float, q: float, tol: float = 0.02) -> bool:
+    """p and q within tol of each other or of a 2:1 / 3:1 harmonic."""
+    return any(abs(p / (q * k) - 1) < tol for k in (1, 2, 0.5, 3, 1 / 3))
 
 
 def _red_noise_snr(t, f, P, t0, dur, depth, n_tr) -> float:

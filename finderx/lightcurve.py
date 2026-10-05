@@ -326,6 +326,31 @@ def clip_upper(f: np.ndarray, sigma: float = 4.0) -> np.ndarray:
     return f < med + sigma * s
 
 
+def trim_edges(t: np.ndarray, width: float = 0.25) -> np.ndarray:
+    """Mask the first/last `width` days of every segment (thermal and
+    scattered-light ramps after downlinks and momentum dumps)."""
+    keep = np.ones(len(t), bool)
+    for seg in segments(t):
+        ts = t[seg]
+        keep[seg] = (ts - ts[0] > width) & (ts[-1] - ts > width)
+    return keep
+
+
+def clip_isolated_dips(f: np.ndarray, sigma: float = 5.0) -> np.ndarray:
+    """Mask single-cadence negative spikes; real transits span many cadences."""
+    from scipy.ndimage import median_filter
+
+    if len(f) < 10:
+        return np.ones(len(f), bool)
+    d = f - median_filter(f, size=5, mode="nearest")
+    s = robust_std(d)
+    low = d < -sigma * s
+    nb = np.zeros(len(f), bool)
+    nb[1:] |= d[:-1] < -0.5 * sigma * s
+    nb[:-1] |= d[1:] < -0.5 * sigma * s
+    return ~(low & ~nb)
+
+
 def bin_lc(t: np.ndarray, f: np.ndarray, width: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Bin by time; returns (t, f, n) for non-empty bins."""
     if len(t) == 0:

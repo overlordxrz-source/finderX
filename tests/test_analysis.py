@@ -126,3 +126,25 @@ def test_red_noise_snr_is_not_larger_than_white():
 def test_star_rejects_placeholder_radius():
     st = A.Star.from_meta({"radius": -1.0, "logg": 4.4, "teff": 5000})
     assert st.radius is None and st.mass is None
+
+
+def test_iterative_search_does_not_repeat_a_signal():
+    t, f = sector(11, noise=4e-4)
+    f -= box(t, 4.2, 3001.1, 0.2, 5e-3)
+    signals, _ = search(t, f)
+    periods = [s.period for s in signals]
+    for i, p in enumerate(periods):
+        for q in periods[i + 1:]:
+            assert not A._same_period(p, q)
+
+
+def test_cleaning_keeps_transits_and_drops_spikes_and_edges():
+    t, f = sector(12, noise=3e-4)
+    f -= box(t, 3.3, 3001.6, 0.12, 3e-3)
+    spike = 500
+    f[spike] -= 0.02
+    keep = L.clip_isolated_dips(f) & L.trim_edges(t)
+    assert not keep[spike]
+    intr = box(t, 3.3, 3001.6, 0.12, 1.0) > 0
+    assert keep[intr].mean() > 0.9          # transits survive
+    assert not keep[0] and not keep[-1]     # segment edges trimmed

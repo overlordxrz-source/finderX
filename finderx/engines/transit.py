@@ -208,7 +208,7 @@ def _process(ctx: JobContext, tic: int, products: list[dict], include_known: boo
         ctx.emit("target", ra=meta["ra"], dec=meta["dec"], label=label)
     secs = meta.get("sectors") or [lc.sector]
     ctx.stage("CLEAN", "run", label)
-    keep = L.clip_upper(lc.flux)
+    keep = L.clip_upper(lc.flux) & L.clip_isolated_dips(lc.flux) & L.trim_edges(lc.time)
     t, f = lc.time[keep], lc.flux[keep]
     cen = (lc.centroid_col[keep], lc.centroid_row[keep]) if lc.centroid_col is not None else None
     star = A.Star.from_meta(meta)
