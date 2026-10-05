@@ -22,7 +22,7 @@ const store = {
 
 const S = {
   cands: [],
-  filter: { status: "new,flagged", engine: "", known: store.get("known", false), order: store.get("order", "recent") },
+  filter: { status: "new,flagged", engine: "", known: store.get("known", false), order: store.get("order", "score") },
   sel: null,
   detail: null,
   jobs: new Map(),
