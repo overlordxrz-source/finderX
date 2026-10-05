@@ -110,6 +110,14 @@
       <div class="view" id="view-field">
         <div class="empty" id="field-empty">Select a STARS or DEEP candidate to see it in context.</div>
         <div class="plot-box field-box" id="field-box" hidden><div class="plot-t" id="pt-field"></div><canvas id="p-field"></canvas></div>
+        <div class="pixfield" id="pixfield" hidden>
+          <div class="plot-t"><span id="pt-pix">PIXEL CHECK · TESS difference imaging</span><span class="seg pix-tabs" id="pix-tabs"></span></div>
+          <div class="pixfield-row">
+            <figure><canvas id="pf-direct"></canvas><figcaption>TESS IMAGE · 11 × 11 pixels (21″ each), median out of transit</figcaption></figure>
+            <figure><canvas id="pf-diff"></canvas><figcaption>WHAT DIMMED · out-of-transit minus in-transit, in σ</figcaption></figure>
+            <div class="pixfield-side" id="pf-side"></div>
+          </div>
+        </div>
       </div>
       <div class="view" id="view-solar">
         <div class="solar" id="solar"><div class="empty">Run SOLAR to load the NEO Confirmation Page, upcoming close approaches or a SkyBoT field census.</div></div>

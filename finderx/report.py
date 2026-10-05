@@ -89,6 +89,15 @@ def text(c: dict) -> str:
         for k, v in m.items():
             if v is not None and not isinstance(v, (dict, list)):
                 lines.append(f"{k:<20}{v}")
+    pix = m.get("pixels")
+    if pix:
+        lines += ["", f"Pixel check (TESS difference image): {pix['verdict'].replace('_', ' ').upper()}", f"  {pix['reason']}"]
+        for sec in pix.get("sectors", []):
+            lines.append(f"  S{sec['sector']}: {sec['verdict'].replace('_', ' ')} · {sec['n_events']} events · peak SNR {sec.get('peak_snr')}")
+        if pix["verdict"] == "off_target" and pix.get("sectors"):
+            best = next((s["best"] for s in pix["sectors"] if s["sector"] == pix.get("lead_sector")), None)
+            if best:
+                lines.append(f"  → the variable star is Gaia DR3 {best['gaia']} (G {best['G']}); submit it, not the TIC target.")
     if c.get("known"):
         lines += ["", "Catalogue matches"]
         for k in c["known"]:

@@ -79,5 +79,9 @@ VARIABLE = {
     "min_amp_ppm": 800.0,
 }
 
+# Run the TESS difference-image check automatically on planet candidates that
+# survive the multi-sector re-search (~30 MB download per sector).
+PIXELS_AUTO = os.environ.get("FINDERX_PIXELS_AUTO", "1") != "0"
+
 # Matching radii.
 TESS_PIXEL_ARCSEC = 21.0

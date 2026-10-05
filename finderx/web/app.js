@@ -55,6 +55,10 @@ const FLAGS = {
   SEEN_IN_SEVERAL_SECTORS: ["good", "the same transits recur in independent TESS sectors"],
   ONE_SECTOR_ONLY: ["warn", "all transits fall in one sector even though others were searched"],
   SINGLE_SECTOR_ONLY: ["warn", "TESS has observed this star in only one sector so far"],
+  PIXELS_ON_TARGET: ["good", "TESS difference image: the target star itself is dimming"],
+  PIXELS_OFF_TARGET: ["bad", "TESS difference image: a neighbouring star is dimming, not the target"],
+  PIXELS_AMBIGUOUS: ["warn", "TESS difference image cannot separate the target from a neighbour"],
+  PIXELS_INCONCLUSIVE: ["warn", "signal too weak in individual pixels to locate"],
   VARIABLE_HOST: ["warn", "the star itself pulsates or rotates; the dip was found after removing that signal"],
   NEARBY_CONTAMINANT: ["warn", "a nearby Gaia star could produce this dip if it were an eclipsing binary"],
   VSX_ENTRY_LACKS_PERIOD: ["good", "VSX knows the star but has no period — you can add it"],
@@ -84,7 +88,7 @@ const KIND_LABEL = {
   variable: "variable star", known_variable: "known variable", high_velocity: "high velocity", nearby: "nearby star",
   hidden_companion: "hidden companion", ultracool: "ultracool dwarf", white_dwarf: "white dwarf",
   quasar: "quasar candidate", galaxy: "galaxy candidate", obscured_agn: "obscured AGN",
-  systematic: "systematic", known_quasar: "known quasar", known_galaxy: "known galaxy", known_obscured_agn: "known AGN",
+  systematic: "systematic", blend: "blended neighbour", known_quasar: "known quasar", known_galaxy: "known galaxy", known_obscured_agn: "known AGN",
 };
 
 // ── sky ──────────────────────────────────────────────────────────────
@@ -278,6 +282,8 @@ function onJob(ev) {
       if (mode === "approaches" || mode === "watch") S.solar.approaches = [];
     }
   } else {
+    const done = S.jobs.get(ev.job);
+    if (done?.engine === "pixels" && done.params?.cid === S.sel) select(S.sel);
     S.jobs.delete(ev.job);
     sky.endSweep(ev.job);
     if (S.patrol === ev.job) setPatrol(null);
@@ -505,8 +511,10 @@ async function select(cid) {
     sky.goto(c.ra, c.dec, c.engine === "transit" || c.engine === "variable" ? 0.25 : 0.08);
   }
   if (c.engine === "transit" || c.engine === "variable") {
-    if (S.view !== "sky") setView("signal"); else $('[data-view="signal"]').classList.add("ping");
+    if (S.view === "field" && c.metrics?.pixels) { /* stay on the pixel maps */ }
+    else if (S.view !== "sky") setView("signal"); else $('[data-view="signal"]').classList.add("ping");
     renderSignal(c);
+    renderField(c);
   } else {
     if (S.view === "signal") setView("field");
     renderField(c);
@@ -597,6 +605,7 @@ function renderDossier(c) {
     ${c.analyst ? `<div class="analyst"><b>ANALYST NOTE</b>${esc(c.analyst)}</div>` : ""}
     <div class="d-sec"><div class="d-sh">MEASUREMENTS</div>${metricsFor(c)}</div>
     ${flags ? `<div class="d-sec"><div class="d-sh">FLAGS</div><div class="flags">${flags}</div></div>` : ""}
+    ${c.engine === "transit" ? pixelSection(c) : ""}
     <div class="d-sec"><div class="d-sh">CATALOGUE MATCHES</div><div class="known">${known || '<div class="dim">none — nobody has catalogued this signal</div>'}</div></div>
     ${c.ra != null ? `<div class="d-sec"><div class="d-sh">IMAGING · ${(fov * 60).toFixed(1)}′ field</div><div class="cut">
       <div class="seg cut-tabs">${tabs.map((t, i) => `<button type="button" data-cut="${t}" class="${i ? "" : "on"}">${t}</button>`).join("")}</div>
@@ -612,7 +621,98 @@ function renderDossier(c) {
   }));
   $$("[data-vote]").forEach((b) => b.addEventListener("click", () => vote(b.dataset.vote)));
   $("#d-report").addEventListener("click", () => showReport(c.id));
+  $("#d-pixels")?.addEventListener("click", async (e) => {
+    e.target.disabled = true;
+    e.target.textContent = "RUNNING … (~20 s)";
+    try { await post(`/api/candidates/${c.id}/pixels`, {}); } catch (err) { logLine({ src: "PIXELS", msg: err.message, level: "error" }); }
+  });
+  $("#d-pixmaps")?.addEventListener("click", () => setView("field"));
   $("#d-replay")?.addEventListener("click", () => { setView("signal"); S.sig?.replay(); });
+}
+
+// ── pixel check (TESS difference imaging) ────────────────────────────
+const VERDICT = {
+  on_target: ["ON TARGET", "var(--green)"], off_target: ["ON A NEIGHBOUR", "var(--red)"],
+  ambiguous: ["AMBIGUOUS", "var(--gold)"], inconclusive: ["INCONCLUSIVE", "var(--tx2)"],
+};
+function pixelSection(c) {
+  const p = c.metrics?.pixels;
+  if (!p) return `<div class="d-sec"><div class="d-sh">PIXEL CHECK</div><div class="hint" style="padding:0 14px 8px">Which star is dimming? Compares TESS pixels in and out of transit and fits every Gaia star in the cutout (~20 s).</div><div class="d-actions"><button class="btn" id="d-pixels">RUN PIXEL CHECK</button></div></div>`;
+  const [label, color] = VERDICT[p.verdict] || [p.verdict, "var(--tx2)"];
+  return `<div class="d-sec"><div class="d-sh">PIXEL CHECK <span class="dim">· maps in FIELD view (3)</span></div>
+    <div class="pix-verdict" style="--vc:${color}"><b>${label}</b><span>${esc(p.reason)}</span></div>
+    <div class="d-actions"><button class="btn" id="d-pixmaps">SHOW PIXEL MAPS</button><button class="btn" id="d-pixels">RE-RUN</button></div></div>`;
+}
+
+function drawPixels(p, sector) {
+  const s = (p.sectors || []).find((x) => x.sector === sector) || p.sectors[0];
+  if (!s) return;
+  const n = s.direct.length;
+  const tG = s.target?.G ?? 12;
+  const shown = s.stars.filter((st) => st.is_target || (s.best && st.gaia === s.best.gaia) || st.G < tG + 4.5);
+  const paint = (canvas, grid, colour) => {
+    const r = canvas.getBoundingClientRect();
+    const size = Math.max(60, Math.min(r.width, r.height || r.width));
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = size * dpr; canvas.height = size * dpr;
+    canvas.style.height = size + "px"; canvas.style.width = size + "px";
+    const g = canvas.getContext("2d");
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const cell = size / n;
+    animate(canvas, 700, (k) => {
+      g.fillStyle = "#05070a";
+      g.fillRect(0, 0, size, size);
+      for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+        if ((i * n + j) / (n * n) > ease(k) * 1.02) continue;
+        g.fillStyle = colour(grid[i][j]);
+        g.fillRect(j * cell, (n - 1 - i) * cell, cell + 0.5, cell + 0.5);
+      }
+      if (k < 1) return;
+      const X = (x) => (x + 0.5) * cell, Y = (y) => (n - 0.5 - y) * cell;
+      g.font = "10px JetBrains Mono, monospace";
+      for (const st of shown) {
+        const rad = Math.max(2.5, cell * 0.32 - (st.G - tG) * cell * 0.04);
+        g.beginPath(); g.arc(X(st.x), Y(st.y), rad, 0, Math.PI * 2);
+        g.strokeStyle = "rgba(120,170,255,.75)"; g.lineWidth = 1; g.stroke();
+      }
+      const ring = (st, col, label, dy) => {
+        if (!st) return;
+        g.beginPath(); g.arc(X(st.x), Y(st.y), cell * 0.62, 0, Math.PI * 2);
+        g.strokeStyle = col; g.lineWidth = 2.5; g.stroke();
+        g.fillStyle = col; g.fillText(label, X(st.x) + cell * 0.7, Y(st.y) + dy * cell);
+      };
+      ring(s.target, "#32a467", "TARGET", -0.5);
+      if (s.best && !s.best.is_target) ring(s.best, "#e76a6e", `DIMMING · G ${s.best.G}`, 0.95);
+    });
+  };
+  paint($("#pf-direct"), s.direct, (v) => { const x = Math.max(0, Math.min(1, Math.sqrt(Math.max(v, 0)))); const c = Math.round(20 + 220 * x); return `rgb(${c},${c},${Math.min(255, c + 12)})`; });
+  const vmax = Math.max(4, ...s.snr.flat());
+  paint($("#pf-diff"), s.snr, (v) => {
+    if (v >= 0) { const x = Math.min(1, v / vmax); return `rgb(${Math.round(15 + 225 * x)},${Math.round(15 + 140 * x)},${Math.round(20 + 40 * x)})`; }
+    const x = Math.min(1, -v / vmax); return `rgb(15,${Math.round(18 + 50 * x)},${Math.round(25 + 120 * x)})`;
+  });
+  const [label, color] = VERDICT[s.verdict] || [s.verdict, "var(--tx2)"];
+  const rows = s.stars.slice(0, 8).map((st) => `<tr class="${st.is_target ? "t" : s.best && st.gaia === s.best.gaia ? "b" : ""}"><td>${st.is_target ? "target" : esc(st.gaia.slice(-6))}</td><td>${num(st.G, 1)}</td><td>${num(st.chi2, 0)}</td><td>${st.needed_depth < 1 ? (st.needed_depth * 100).toFixed(1) + "%" : "—"}</td></tr>`).join("");
+  $("#pf-side").innerHTML = `<div class="pix-verdict" style="--vc:${color}"><b>S${s.sector} · ${label}</b><span>${esc(s.reason)}</span></div>
+    <div class="hint" style="margin-bottom:8px">${s.n_events} events · peak SNR ${s.peak_snr}. Each Gaia star gets a PSF fit to the difference image; lowest χ² wins. "Needs" is the eclipse depth that star would need to produce the dip.</div>
+    <table><tr><th>STAR</th><th>G</th><th>χ²</th><th>NEEDS</th></tr>${rows}</table>`;
+}
+
+function renderPixelField(c) {
+  const p = c.metrics?.pixels;
+  const has = !!p?.sectors?.length;
+  $("#pixfield").hidden = !has;
+  if (!has) return false;
+  $("#field-empty").hidden = true;
+  $("#field-box").hidden = true;
+  $("#pix-tabs").innerHTML = p.sectors.map((x) => `<button type="button" data-sec="${x.sector}" class="${x.sector === p.lead_sector ? "on" : ""}">S${x.sector}</button>`).join("");
+  $$("#pix-tabs button").forEach((b) => b.addEventListener("click", () => {
+    $$("#pix-tabs button").forEach((x) => x.classList.toggle("on", x === b));
+    drawPixels(p, +b.dataset.sec);
+  }));
+  S.pixPending = c;
+  if (S.view === "field") requestAnimationFrame(() => drawPixels(p, p.lead_sector));
+  return true;
 }
 
 function showCut(which, c, fov) {
@@ -690,6 +790,10 @@ function renderSignal(c) {
   requestAnimationFrame(() => drawSignal(c, els));
 }
 function renderField(c) {
+  S.pixPending = null;
+  S.fieldPending = null;
+  if (c.engine === "transit" && renderPixelField(c)) return;
+  $("#pixfield").hidden = true;
   const has = (c.engine === "stellar" && c.plots?.hr) || (c.engine === "galaxy" && c.plots?.wise);
   $("#field-empty").hidden = !!has;
   $("#field-box").hidden = !has;
@@ -699,7 +803,8 @@ function renderField(c) {
 }
 new ResizeObserver(() => {
   if (S.view === "signal" && S.sig?.redraw) S.sig.redraw();
-  if (S.view === "field" && S.fieldPending) drawField(S.fieldPending, $("#p-field"), $("#pt-field"), S.cands.filter((x) => x.job === S.fieldPending.job));
+  if (S.view === "field" && S.pixPending) drawPixels(S.pixPending.metrics.pixels, +($("#pix-tabs .on")?.dataset.sec || S.pixPending.metrics.pixels.lead_sector));
+  else if (S.view === "field" && S.fieldPending) drawField(S.fieldPending, $("#p-field"), $("#pt-field"), S.cands.filter((x) => x.job === S.fieldPending.job));
 }).observe($(".stage"));
 
 // ── views ────────────────────────────────────────────────────────────
@@ -712,7 +817,8 @@ function setView(v) {
   $("#vt-replay")?.addEventListener("click", () => S.sig?.replay());
   if (v === "signal" && S.sig?.pending) { const c = S.sig.pending; S.sig.pending = null; requestAnimationFrame(() => drawSignal(c, S.sig)); }
   else if (v === "signal" && S.sig?.redraw) { const sig = S.sig; requestAnimationFrame(() => sig.redraw?.()); }
-  if (v === "field" && S.fieldPending) requestAnimationFrame(() => drawField(S.fieldPending, $("#p-field"), $("#pt-field"), S.cands.filter((x) => x.job === S.fieldPending.job)));
+  if (v === "field" && S.pixPending) { const c = S.pixPending; requestAnimationFrame(() => drawPixels(c.metrics.pixels, c.metrics.pixels.lead_sector)); }
+  else if (v === "field" && S.fieldPending) requestAnimationFrame(() => drawField(S.fieldPending, $("#p-field"), $("#pt-field"), S.cands.filter((x) => x.job === S.fieldPending.job)));
   if (v === "solar") renderSolar();
   if (v === "log") renderLog();
 }

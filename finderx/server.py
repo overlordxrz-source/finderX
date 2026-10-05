@@ -114,6 +114,12 @@ def create_app(manager: JobManager | None = None) -> FastAPI:
         m.bus.publish({"type": "vote", "id": cid, "status": body.get("status")})
         return {"ok": True}
 
+    @app.post("/api/candidates/{cid}/pixels")
+    def candidate_pixels(cid: str):
+        if not m.db.candidate(cid):
+            raise HTTPException(404, "no such candidate")
+        return {"job": m.submit("pixels", {"cid": cid})}
+
     @app.get("/api/candidates/{cid}/report", response_class=PlainTextResponse)
     def candidate_report(cid: str):
         c = m.db.candidate(cid)

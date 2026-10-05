@@ -176,6 +176,7 @@ kbd { font: 9px var(--mono); color: var(--tx3); border: 1px solid var(--line2); 
 .k-variable, .k-known_variable { --k: var(--gold); }
 .k-high_velocity, .k-nearby, .k-hidden_companion, .k-ultracool, .k-white_dwarf { --k: var(--cyan); }
 .k-systematic { --k: var(--tx3); }
+.k-blend { --k: var(--red); }
 .k-quasar, .k-galaxy, .k-obscured_agn, .k-known_quasar, .k-known_galaxy, .k-known_obscured_agn { --k: var(--violet); }
 .qi-bar { background: var(--k, var(--tx3)); }
 .tag {
@@ -407,3 +408,31 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 11px; font-varian
   .mission { grid-template-columns: repeat(2, 1fr); }
   .suggest { left: 12px; min-width: 0; right: 12px; }
 }
+
+/* pixel check */
+.pix-verdict { margin: 0 14px 8px; padding: 7px 10px; border-left: 2px solid var(--vc); background: rgba(255,255,255,.02); font-size: 11px; }
+.pix-verdict b { display: block; color: var(--vc); letter-spacing: .14em; font-size: 10px; margin-bottom: 2px; }
+.pix-verdict span { color: var(--tx1); }
+.pix { padding: 0 14px 8px; }
+.pix-tabs { margin-bottom: 6px; }
+.pix-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.pix-row figure { margin: 0; }
+.pix-row canvas { width: 100%; aspect-ratio: 1; display: block; border: 1px solid var(--line); image-rendering: pixelated; }
+.pix-row figcaption { font-size: 9px; color: var(--tx3); letter-spacing: .1em; text-transform: uppercase; margin-top: 3px; }
+.pix-legend { display: flex; gap: 10px; font-size: 9px; color: var(--tx3); margin-top: 6px; align-items: center; }
+.pix-legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; border: 2px solid; margin-right: -6px; }
+.pl-t { border-color: var(--green); } .pl-b { border-color: var(--red); } .pl-s { border-color: rgba(76,144,240,.55); border-width: 1px !important; }
+.pixfield { position: absolute; inset: 0; display: flex; flex-direction: column; }
+.pixfield .pix-tabs { width: auto; }
+.pixfield .pix-tabs button { padding: 2px 10px; }
+.pixfield-row { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 260px; gap: 14px; padding: 12px; }
+.pixfield-row figure { margin: 0; display: flex; flex-direction: column; min-height: 0; }
+.pixfield-row canvas { width: 100%; max-height: calc(100% - 22px); aspect-ratio: 1; object-fit: contain; image-rendering: pixelated; border: 1px solid var(--line); }
+.pixfield-row figcaption { font-size: 9px; letter-spacing: .1em; color: var(--tx3); margin-top: 6px; }
+.pixfield-side { overflow-y: auto; font-size: 11px; }
+.pixfield-side .pix-verdict { margin: 0 0 10px; }
+.pixfield-side table { width: 100%; border-collapse: collapse; font-size: 10px; font-variant-numeric: tabular-nums; }
+.pixfield-side th { text-align: left; color: var(--tx3); font-weight: 400; padding: 3px 4px; border-bottom: 1px solid var(--line); }
+.pixfield-side td { padding: 3px 4px; border-bottom: 1px solid var(--line); color: var(--tx1); }
+.pixfield-side tr.t td { color: var(--green-l); } .pixfield-side tr.b td { color: var(--red); }
+@media (max-width: 820px) { .pixfield-row { grid-template-columns: 1fr; overflow: auto; } }

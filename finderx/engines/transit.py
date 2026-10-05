@@ -377,7 +377,7 @@ def _process(ctx: JobContext, tic: int, products: list[dict], include_known: boo
         if not payload_saved:
             ctx.db.payload_put(pid, payload)
             payload_saved = True
-        ctx.candidate(
+        cid = ctx.candidate(
             {
                 **base,
                 "engine": "transit",
@@ -393,6 +393,8 @@ def _process(ctx: JobContext, tic: int, products: list[dict], include_known: boo
         )
         emitted += 1
         outcome = kind
+        if deep and kind == "planet_candidate" and config.PIXELS_AUTO:
+            _auto_pixels(ctx, cid)
 
     if var and var.ptp_ppm > 1.5e6 and var.type_guess not in ("RRAB", "EA"):
         ctx.log(f"{label} {var.ptp_ppm / 1e4:.0f}% swing looks instrumental — skipped", level="debug", src="VET")
@@ -438,6 +440,17 @@ def _process(ctx: JobContext, tic: int, products: list[dict], include_known: boo
 
 
 _register_lock = threading.Lock()
+
+
+def _auto_pixels(ctx: JobContext, cid: str) -> None:
+    """Multi-sector survivors get a TESS difference-image check straight away."""
+    from . import pixels as pe
+
+    try:
+        c = ctx.db.candidate(cid)
+        pe.apply(ctx, c, pe.check_candidate(ctx, c))
+    except Exception as exc:
+        ctx.log(f"{cid} pixel check failed ({exc})", level="warn", src="PIXELS")
 
 
 def _transit_times(t: np.ndarray, s: A.TransitSignal) -> list[float]:

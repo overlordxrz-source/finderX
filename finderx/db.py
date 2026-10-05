@@ -235,6 +235,15 @@ class DB:
         )
         return int((r or {}).get("n") or 0)
 
+    def candidate_update(self, cid: str, **fields) -> None:
+        sets, args = [], []
+        for k, v in fields.items():
+            if k not in ("kind", "flags", "score", "metrics", "known", "title", "subtitle"):
+                raise ValueError(k)
+            sets.append(f"{k}=?")
+            args.append(json.dumps(v) if k in ("flags", "metrics", "known") else v)
+        self.x(f"UPDATE candidates SET {', '.join(sets)}, updated=? WHERE id=?", (*args, time.time(), cid))
+
     def candidate_reclassify(self, cid: str, kind: str, flags: list[str], score: float) -> None:
         self.x("UPDATE candidates SET kind=?, flags=?, score=?, updated=? WHERE id=?", (kind, json.dumps(flags), score, time.time(), cid))
 

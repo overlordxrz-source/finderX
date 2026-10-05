@@ -125,3 +125,50 @@ def test_bundle_roundtrip_keeps_plots_and_notes():
     full = dst.candidate(got["id"])
     assert full["analyst"] == "looks real" and full["plots"]["raw"]["f"] == [1.0]
     assert got["id"] != "FXT-0001"
+
+
+def test_pixel_check_finds_the_dimming_neighbour():
+    import numpy as np
+    from astropy.wcs import WCS
+
+    from finderx import pixels as px
+
+    w = WCS(naxis=2)
+    w.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+    w.wcs.crval = [100.0, -30.0]
+    w.wcs.crpix = [6.0, 6.0]                       # FITS 1-based → pixel (5, 5)
+    w.wcs.cdelt = [-21 / 3600, 21 / 3600]
+    hdr = w.to_header()
+
+    rng = np.random.default_rng(3)
+    t = np.arange(3000, 3027, 0.0023)
+    P, t0, dur = 3.1, 3001.0, 0.12
+    intr = np.abs(((t - t0) / P + 0.5) % 1 - 0.5) * P < dur / 2
+    target = (5.0, 5.0)
+    neighbour = (7.0, 4.0)
+    cube = np.zeros((t.size, 11, 11))
+    cube += 2000 * px._psf(*target)[None]
+    cube += 300 * px._psf(*neighbour)[None] * np.where(intr, 0.85, 1.0)[:, None, None]   # neighbour eclipses 15 %
+    cube += rng.normal(0, 0.4, cube.shape)
+    cut = {"sector": 1, "time": t, "flux": cube, "wcs": hdr}
+
+    img = px.difference_image(cut, P, t0, dur)
+    assert img and img["n_events"] >= 7
+    ra_t, de_t = w.pixel_to_world_values(*target)
+    ra_n, de_n = w.pixel_to_world_values(*neighbour)
+    stars = [
+        {"Source": 1, "RA_ICRS": float(ra_t), "DE_ICRS": float(de_t), "Gmag": 11.0},
+        {"Source": 2, "RA_ICRS": float(ra_n), "DE_ICRS": float(de_n), "Gmag": 13.0},
+    ]
+    depth = 0.15 * 300 / 2300
+    loc = px.locate(cut, img, stars, 1, float(ra_t), float(de_t), depth)
+    assert loc["verdict"] == "off_target" and loc["best"]["gaia"] == "2"
+
+    # same field, but now the target carries the dip → on target
+    cube2 = np.zeros_like(cube)
+    cube2 += 2000 * px._psf(*target)[None] * np.where(intr, 0.99, 1.0)[:, None, None]
+    cube2 += 300 * px._psf(*neighbour)[None]
+    cube2 += rng.normal(0, 0.4, cube.shape)
+    cut2 = {**cut, "flux": cube2}
+    loc2 = px.locate(cut2, px.difference_image(cut2, P, t0, dur), stars, 1, float(ra_t), float(de_t), 0.01)
+    assert loc2["verdict"] == "on_target"

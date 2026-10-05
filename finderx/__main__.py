@@ -12,6 +12,7 @@
   python -m finderx vote FXT-0001 confirm --note "clean U-shaped transit"
   python -m finderx note FXT-0001 "analyst text"  # notes from an agent / reviewer
   python -m finderx report FXT-0001
+  python -m finderx pixels FXT-0001               # which star is dimming? (TESS difference image)
   python -m finderx export --status confirmed --format csv
   python -m finderx bundle --out mine.json.gz     # share candidates with plots + notes
   python -m finderx import docs/first-light.json.gz
@@ -179,6 +180,15 @@ def cmd_export(a) -> None:
         sys.stdout.write(out)
 
 
+def cmd_pixels(a) -> None:
+    from .jobs import JobManager
+
+    m = JobManager()
+    m.bus.on(_printer(a.verbose))
+    for cid in a.ids:
+        m.run_sync("pixels", {"cid": cid})
+
+
 def cmd_bundle(a) -> None:
     import gzip
 
@@ -286,6 +296,11 @@ def main(argv=None) -> None:
     s.add_argument("--format", choices=["csv", "json"], default="csv")
     s.add_argument("--out")
     s.set_defaults(fn=cmd_export)
+
+    s = sub.add_parser("pixels", help="locate the dimming star in TESS pixels (difference imaging)")
+    s.add_argument("ids", nargs="+")
+    s.add_argument("-v", "--verbose", action="store_true")
+    s.set_defaults(fn=cmd_pixels)
 
     s = sub.add_parser("bundle", help="export candidates + plots + notes to share")
     s.add_argument("--out", default="finderx-bundle.json.gz")
