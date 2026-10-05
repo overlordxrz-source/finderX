@@ -13,6 +13,7 @@
   python -m finderx note FXT-0001 "analyst text"  # notes from an agent / reviewer
   python -m finderx report FXT-0001
   python -m finderx pixels FXT-0001               # which star is dimming? (TESS difference image)
+  python -m finderx plan --site lco-ctio          # when can you watch your candidates eclipse?
   python -m finderx export --status confirmed --format csv
   python -m finderx bundle --out mine.json.gz     # share candidates with plots + notes
   python -m finderx import docs/first-light.json.gz
@@ -189,6 +190,30 @@ def cmd_pixels(a) -> None:
         m.run_sync("pixels", {"cid": cid})
 
 
+def cmd_plan(a) -> None:
+    from . import planner
+
+    db = dbmod.get()
+    if a.site or a.lat is not None:
+        obs = planner.observer_from({"key": a.site} if a.site else {"lat": a.lat, "lon": a.lon, "elev": a.elev or 0, "name": a.name})
+        db.meta_set("observer", obs)
+    obs = db.meta_get("observer", planner.DEFAULT_OBSERVER)
+    p = planner.plan(db, obs, a.days)
+    if a.json:
+        print(json.dumps(p, default=str, indent=1))
+        return
+    print(f"{obs['name']}  ({obs['lat']:+.3f}, {obs['lon']:+.3f}) · tonight: {p['darkness']}\n")
+    print(f"{'MID-EVENT (UTC)':<18}{'±min':>5}  {'ID':<10}{'STAR TO WATCH':<38}{'DEPTH':>7}{'DUR h':>7}{'ALT':>5}  QUALITY")
+    for e in p["events"]:
+        print(f"{e['mid_utc']:<18}{e['uncertainty_min']:>5}  {e['id']:<10}{e['star'][:37]:<38}{e['depth_pct']:>6.2f}%{e['duration_h']:>7.2f}{e['alt'][4]:>5}  {e['quality']}")
+    if not p["events"]:
+        print("no observable events in this window")
+    if p.get("neocp"):
+        print(f"\nNEOCP objects up tonight (V ≤ 20.5): {len(p['neocp'])}")
+        for o in p["neocp"][:15]:
+            print(f"  {o['name']:<9} score {o['score']:>3}  V {o['vmag']:<5} best {o['best_utc']} UTC at {o['best_alt']}°  ({o['hours_up']} h above 30°)")
+
+
 def cmd_bundle(a) -> None:
     import gzip
 
@@ -301,6 +326,16 @@ def main(argv=None) -> None:
     s.add_argument("ids", nargs="+")
     s.add_argument("-v", "--verbose", action="store_true")
     s.set_defaults(fn=cmd_pixels)
+
+    s = sub.add_parser("plan", help="observable eclipses + NEOCP objects from your site")
+    s.add_argument("--site", help="preset: " + ", ".join(__import__("finderx.planner", fromlist=["SITES"]).SITES))
+    s.add_argument("--lat", type=float)
+    s.add_argument("--lon", type=float)
+    s.add_argument("--elev", type=float)
+    s.add_argument("--name")
+    s.add_argument("--days", type=float, default=14)
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(fn=cmd_plan)
 
     s = sub.add_parser("bundle", help="export candidates + plots + notes to share")
     s.add_argument("--out", default="finderx-bundle.json.gz")

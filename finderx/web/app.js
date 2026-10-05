@@ -833,6 +833,7 @@ function setView(v) {
   if (v === "field" && S.pixPending) { const c = S.pixPending; requestAnimationFrame(() => drawPixels(c.metrics.pixels, c.metrics.pixels.lead_sector)); }
   else if (v === "field" && S.fieldPending) requestAnimationFrame(() => drawField(S.fieldPending, $("#p-field"), $("#pt-field"), S.cands.filter((x) => x.job === S.fieldPending.job)));
   if (v === "solar") renderSolar();
+  if (v === "plan") renderPlan();
   if (v === "log") renderLog();
 }
 $("#views").addEventListener("click", (e) => { const b = e.target.closest(".vt"); if (b) setView(b.dataset.view); });
@@ -871,6 +872,58 @@ $("#solar").addEventListener("click", (e) => {
   sky.goto(+tr.dataset.ra, +tr.dataset.dec, 0.5);
 });
 
+// ── night planner ────────────────────────────────────────────────────
+function altSpark(alts, suns) {
+  const w = 72, h = 18, n = alts.length;
+  const pts = alts.map((a, i) => `${(i / (n - 1)) * w},${h - Math.max(0, Math.min(90, a)) / 90 * h}`).join(" ");
+  const dark = suns.map((sv, i) => sv < -12 ? `<rect x="${(i / (n - 1)) * w - w / (2 * (n - 1))}" y="0" width="${w / (n - 1)}" height="${h}" fill="rgba(76,144,240,.10)"/>` : "").join("");
+  return `<svg class="altspark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${dark}<line x1="0" x2="${w}" y1="${h - 25 / 90 * h}" y2="${h - 25 / 90 * h}" stroke="#2f3843" stroke-dasharray="2 2"/><polyline points="${pts}" fill="none" stroke="#72ca9b" stroke-width="1.5"/></svg>`;
+}
+
+async function renderPlan(days = 14) {
+  const el = $("#planv");
+  let sites, p;
+  try {
+    [sites, p] = await Promise.all([api("/api/sites"), api(`/api/plan?days=${days}`)]);
+  } catch (err) { el.innerHTML = `<div class="empty">Planner unavailable: ${esc(err.message)}</div>`; return; }
+  const o = p.observer;
+  const opts = Object.entries(sites.sites).map(([k, v]) => `<option value="${k}" ${o.key === k ? "selected" : ""}>${esc(v.name)}</option>`).join("");
+  const ev = p.events.map((e) => `<tr data-id="${e.id}" data-ra="${e.ra}" data-dec="${e.dec}">
+      <td>${esc(e.mid_utc)}</td><td>${e.start_utc}–${e.end_utc}</td><td>±${e.uncertainty_min}m</td><td>${esc(e.id)}</td>
+      <td>${esc(e.star)}</td><td>${num(e.depth_pct, 2)}%</td><td>${altSpark(e.alt, e.sun)} ${e.alt[4]}°</td>
+      <td>${e.moon_sep}° · ${Math.round(e.moon_illum * 100)}%</td><td class="q-${e.quality}">${e.quality.toUpperCase()}</td></tr>`).join("");
+  const neo = (p.neocp || []).map((n) => `<tr data-ra="${n.ra}" data-dec="${n.dec}"><td>${esc(n.name)}</td><td><span class="bar" style="width:${n.score * 0.6}px"></span>${n.score}</td><td>${num(n.vmag, 1)}</td><td>${n.best_utc} UTC</td><td>${n.best_alt}°</td><td>${n.hours_up} h</td><td>${n.nobs} obs · ${num(n.arc_days, 2)} d arc</td></tr>`).join("");
+  el.innerHTML = `
+    <div class="plan-h">
+      <div class="fld"><label>OBSERVING SITE</label><select id="pl-site">${opts}<option value="custom" ${o.key === "custom" ? "selected" : ""}>Custom …</option></select></div>
+      <div class="fld"><label>LAT °</label><input id="pl-lat" value="${o.lat}"></div>
+      <div class="fld"><label>LON ° (east +)</label><input id="pl-lon" value="${o.lon}"></div>
+      <div class="fld"><label>DAYS</label><input id="pl-days" value="${days}"></div>
+      <button class="btn" id="pl-save">UPDATE</button>
+      <div class="plan-dark">${esc(o.name)} · tonight ${esc(p.darkness)}</div>
+    </div>
+    <h3 class="plan-sec">UPCOMING ECLIPSES YOU CAN OBSERVE · ${p.events.length}</h3>
+    <div class="logv-note">Mid-times with 1σ uncertainty from the TESS ephemeris. FULL means the whole event plus 30 min of baseline either side happens in darkness with the star above 25°. For blends, the star listed is the one the pixel check found varying, with the depth that star shows on its own.</div>
+    ${ev ? `<table class="tbl"><tr><th>MID (UTC)</th><th>IN–OUT</th><th>±</th><th>ID</th><th>STAR TO WATCH</th><th>DEPTH</th><th>ALTITUDE</th><th>MOON</th><th></th></tr>${ev}</table>` : `<div class="empty">No candidate eclipse is observable from here in the next ${days} days. Try another site or more days.</div>`}
+    <h3 class="plan-sec">NEOCP OBJECTS UP TONIGHT · ${(p.neocp || []).length}</h3>
+    <div class="logv-note">Unconfirmed objects from the Minor Planet Center that climb above 30° in tonight's darkness, brightest-scoring first. Positions move fast: get a fresh ephemeris from the NEOCP page before observing.</div>
+    ${neo ? `<table class="tbl"><tr><th>OBJECT</th><th>NEO SCORE</th><th>V</th><th>BEST</th><th>ALT</th><th>UP</th><th>DISCOVERY DATA</th></tr>${neo}</table>` : `<div class="empty">Nothing on the NEOCP is well placed tonight.</div>`}`;
+  $("#pl-site").addEventListener("change", (e) => {
+    const s = sites.sites[e.target.value];
+    if (s) { $("#pl-lat").value = s.lat; $("#pl-lon").value = s.lon; }
+  });
+  $("#pl-save").addEventListener("click", async () => {
+    const key = $("#pl-site").value;
+    const body = key !== "custom" && sites.sites[key] && +$("#pl-lat").value === sites.sites[key].lat ? { key } : { lat: +$("#pl-lat").value, lon: +$("#pl-lon").value, name: "My site" };
+    try { await post("/api/observer", body); renderPlan(+$("#pl-days").value || 14); } catch (err) { logLine({ src: "PLAN", msg: err.message, level: "error" }); }
+  });
+  el.querySelectorAll("tr[data-ra]").forEach((tr) => tr.addEventListener("click", () => {
+    if (tr.dataset.id) select(tr.dataset.id);
+    sky.lockOn(+tr.dataset.ra, +tr.dataset.dec);
+    sky.goto(+tr.dataset.ra, +tr.dataset.dec, 0.3);
+  }));
+}
+
 async function renderLog() {
   let conf = [];
   try { conf = (await api("/api/candidates?status=confirmed&limit=1000")).candidates; } catch { /* offline */ }
@@ -907,7 +960,9 @@ const COMMANDS = [
   ["open <id>", "open a candidate"],
   ["confirm|flag|reject [note]", "vet the open candidate"],
   ["queue tovet|confirmed|rejected|all", "filter the queue"],
-  ["view sky|signal|field|solar|log", "switch workspace view"],
+  ["view sky|signal|field|solar|log|plan", "switch workspace view"],
+  ["plan [days]", "observable eclipses + NEOCP tonight from your site"],
+  ["pixels [id]", "run the pixel + archival check on a candidate"],
   ["stop [all]", "stop running jobs"],
   ["export [csv|json]", "download confirmed discoveries"],
   ["clear", "clear the console"],
@@ -970,6 +1025,12 @@ async function exec(line) {
       return loadQueue();
     }
     case "view": return setView(text);
+    case "plan": setView("plan"); return renderPlan(+text || 14);
+    case "pixels": {
+      const id = (text || S.sel || "").toUpperCase();
+      if (!id) return logLine({ src: "PIXELS", msg: "open a candidate first", level: "warn" });
+      return post(`/api/candidates/${id}/pixels`, {});
+    }
     case "stop":
       for (const j of S.jobs.keys()) if (text === "all" || !text || text === j) await post(`/api/jobs/${j}/cancel`, {});
       return;
@@ -1036,7 +1097,7 @@ document.addEventListener("keydown", (e) => {
   else if (k === "r") vote("rejected");
   else if (k === "/") { e.preventDefault(); cmdEl.focus(); }
   else if (k === " " && S.view === "signal") { e.preventDefault(); S.sig?.replay?.(); }
-  else if ("12345".includes(k) && k) setView(["sky", "signal", "field", "solar", "log"][+k - 1]);
+  else if ("123456".includes(k) && k) setView(["sky", "signal", "field", "solar", "log", "plan"][+k - 1]);
   else if (e.key === "Escape") $("#modal").hidden = true;
 });
 

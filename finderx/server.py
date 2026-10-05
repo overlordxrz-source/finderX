@@ -136,6 +136,30 @@ def create_app(manager: JobManager | None = None) -> FastAPI:
         return Response(report.to_csv(rows), media_type="text/csv",
                         headers={"Content-Disposition": "attachment; filename=finderx-discoveries.csv"})
 
+    @app.get("/api/sites")
+    def sites():
+        from . import planner
+
+        return {"sites": {k: {"name": v[0], "lat": v[1], "lon": v[2], "elev": v[3]} for k, v in planner.SITES.items()},
+                "observer": m.db.meta_get("observer", planner.DEFAULT_OBSERVER)}
+
+    @app.post("/api/observer")
+    def set_observer(body: dict = Body(...)):
+        from . import planner
+
+        try:
+            obs = planner.observer_from(body)
+        except (KeyError, ValueError) as exc:
+            raise HTTPException(400, str(exc))
+        m.db.meta_set("observer", obs)
+        return obs
+
+    @app.get("/api/plan")
+    def plan(days: float = 14.0):
+        from . import planner
+
+        return planner.plan(m.db, m.db.meta_get("observer", planner.DEFAULT_OBSERVER), min(days, 60.0))
+
     @app.get("/api/stats")
     def stats():
         return m.db.stats()
