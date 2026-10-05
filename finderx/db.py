@@ -137,6 +137,9 @@ class DB:
             )
             return cid, True
 
+    def has_candidate(self, dedupe: str) -> bool:
+        return self.one("SELECT 1 AS x FROM candidates WHERE dedupe=?", (dedupe,)) is not None
+
     def candidates(
         self, status: str | None = None, engine: str | None = None, kind: str | None = None,
         limit: int = 300, order: str = "score",

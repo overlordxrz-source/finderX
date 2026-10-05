@@ -18,7 +18,7 @@ import numpy as np
 from .. import config, net
 from ..jobs import JobContext
 
-STAGES = ["GAIA-QSO", "GAIA-GAL", "WISE", "FUSE", "MILLIQUAS", "SIMBAD", "NED", "SCORE"]
+STAGES = ["GAIA-QSO", "GAIA-GAL", "WISE", "FUSE", "MILLIQUAS", "QUAIA", "SIMBAD", "NED", "SCORE"]
 _EXTRAGAL_SIMBAD = ("QSO", "AGN", "Sy", "Bla", "BLL", "LIN", "G", "rG", "EmG", "SBG", "LSB", "bCG", "IG", "PaG", "GiC", "BiC", "GiG", "GiP", "H2G", "LeG", "LeQ")
 _EXTRAGAL_NED = ("G", "QSO", "GPair", "GTrpl", "GGroup", "GClstr", "QGroup", "Q_Lens", "G_Lens", "AbLS", "RadioS")
 
@@ -39,7 +39,7 @@ def run(ctx: JobContext) -> dict:
     cone = lambda rc, dc: net.cone(rc, dc, ra, dec, radius)  # noqa: E731
 
     ctx.stage("GAIA-QSO", "run")
-    qso = net.tap(config.VIZIER_TAP, f'SELECT Source, RA_ICRS, DE_ICRS, PQSO, PGal, z, ClassDSCC FROM "{config.VZ_GAIA_QSO}" WHERE {cone("RA_ICRS", "DE_ICRS")} AND PQSO > 0.5', timeout=120)
+    qso = net.tap(config.VIZIER_TAP, f'SELECT Source, RA_ICRS, DE_ICRS, PQSO, PGal, z, flagsQSOC, ClassDSCC FROM "{config.VZ_GAIA_QSO}" WHERE {cone("RA_ICRS", "DE_ICRS")} AND PQSO > 0.5', timeout=120)
     ctx.log(f"Gaia DR3 QSO candidates (P>0.5): {len(qso)}", src="GAIA")
     ctx.stage("GAIA-QSO", "ok")
 
@@ -87,13 +87,15 @@ def run(ctx: JobContext) -> dict:
             tags.append("ZERO_ASTROMETRIC_MOTION")
         elif zero_motion is False:
             tags.append("MOVES_LIKE_A_STAR")
-        if (q.get("z") or 0) > 3.5 and "WISE_AGN_COLOURS" in tags:
+        # QSOC redshifts with any flag bit set are often aliased (Gaia DR3 docs)
+        z_ok = q.get("z") is not None and not (q.get("flagsQSOC") or 0)
+        if z_ok and q["z"] > 3.5 and "WISE_AGN_COLOURS" in tags:
             tags.append("HIGH_REDSHIFT")
         strength = (q.get("PQSO") or 0) * 0.45 + (0.25 if "WISE_AGN_COLOURS" in tags else 0) + (0.1 if zero_motion else 0) + (0.2 if "HIGH_REDSHIFT" in tags else 0)
         if "MOVES_LIKE_A_STAR" in tags:
             strength *= 0.3
         cands.append({"kind": "quasar", "ra": q["RA_ICRS"], "dec": q["DE_ICRS"], "id": f"Gaia DR3 {q['Source']}", "tags": tags, "strength": strength,
-                      "m": {"source_id": str(q["Source"]), "p_qso": q.get("PQSO"), "p_gal": q.get("PGal"), "z_qsoc": q.get("z"), "G": a.get("Gmag"), "W1-W2": round(w12, 3) if w12 is not None else None, "W1": w.get("W1mag") if w else None, "W2": w.get("W2mag") if w else None, "W3": w.get("W3mag") if w else None, "parallax": a.get("Plx"), "parallax_err": a.get("e_Plx"), "pmra": a.get("pmRA"), "pmdec": a.get("pmDE")}})
+                      "m": {"source_id": str(q["Source"]), "p_qso": q.get("PQSO"), "p_gal": q.get("PGal"), "z_qsoc": q.get("z"), "z_qsoc_reliable": z_ok, "G": a.get("Gmag"), "W1-W2": round(w12, 3) if w12 is not None else None, "W1": w.get("W1mag") if w else None, "W2": w.get("W2mag") if w else None, "W3": w.get("W3mag") if w else None, "parallax": a.get("Plx"), "parallax_err": a.get("e_Plx"), "pmra": a.get("pmRA"), "pmdec": a.get("pmDE")}})
     for g in gal:
         w = wise_at(g["RA_ICRS"], g["DE_ICRS"], 3.0)
         w12 = (w["W1mag"] - w["W2mag"]) if w and w.get("W1mag") is not None and w.get("W2mag") is not None else None
@@ -135,6 +137,21 @@ def run(ctx: JobContext) -> dict:
         ctx.log(f"Milliquas lookup failed: {exc}", level="warn", src="CDS")
     ctx.stage("MILLIQUAS", "ok")
 
+    ctx.stage("QUAIA", "run")
+    try:
+        quaia = {int(q["GaiaDR3"]): q for q in net.tap(config.VIZIER_TAP, f'SELECT GaiaDR3, objID, zQuaia FROM "{config.VZ_QUAIA}" WHERE {cone("RA_ICRS", "DE_ICRS")}', timeout=120)}
+        n = 0
+        for c in cands:
+            sid = c["m"].get("source_id")
+            if sid and int(sid) in quaia:
+                q = quaia[int(sid)]
+                c.setdefault("known", []).append({"kind": "quaia", "label": f"Quaia {q['objID']}", "type": "QSO (photometric)", "z": q.get("zQuaia"), "match": "source_id", "extragalactic": True})
+                n += 1
+        ctx.log(f"Quaia (Gaia × unWISE quasars, G<20): {len(quaia)} in field, {n} of our candidates already listed", src="CDS")
+    except Exception as exc:
+        ctx.log(f"Quaia lookup failed: {exc}", level="warn", src="CDS")
+    ctx.stage("QUAIA", "ok")
+
     ctx.stage("SIMBAD", "run")
     try:
         for m in net.xmatch(list(zip(c_ra, c_dec)), "simbad", 3.0):
@@ -175,7 +192,8 @@ def run(ctx: JobContext) -> dict:
     for c in sorted(cands, key=lambda c: -c["strength"]):
         known = c.get("known", [])
         classified = [k for k in known if k["kind"] == "milliquas" or k.get("extragalactic")]
-        if classified and not include_known:
+        # a re-scan that now finds a catalogue entry must update the old row
+        if classified and not include_known and not ctx.db.has_candidate(f"galaxy:{c['id']}"):
             continue
         flags = list(c["tags"])
         if not known:
@@ -188,7 +206,7 @@ def run(ctx: JobContext) -> dict:
         m = c["m"]
         if c["kind"] == "quasar":
             sub = f"quasar candidate · P={m.get('p_qso') or 0:.2f}"
-            sub += f" · z≈{m['z_qsoc']:.2f}" if m.get("z_qsoc") else ""
+            sub += f" · z≈{m['z_qsoc']:.2f}{'' if m.get('z_qsoc_reliable') else '?'}" if m.get("z_qsoc") else ""
             sub += f" · W1−W2 {m['W1-W2']:.2f}" if m.get("W1-W2") is not None else ""
         elif c["kind"] == "galaxy":
             sub = f"galaxy candidate · P={m.get('p_gal') or 0:.2f}" + (f" · z≈{m['z_gal']:.3f}" if m.get("z_gal") else "")

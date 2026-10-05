@@ -175,6 +175,7 @@ kbd { font: 9px var(--mono); color: var(--tx3); border: 1px solid var(--line2); 
 .k-eclipsing_binary, .k-known_eb { --k: var(--orange); }
 .k-variable, .k-known_variable { --k: var(--gold); }
 .k-high_velocity, .k-nearby, .k-hidden_companion, .k-ultracool, .k-white_dwarf { --k: var(--cyan); }
+.k-systematic { --k: var(--tx3); }
 .k-quasar, .k-galaxy, .k-obscured_agn, .k-known_quasar, .k-known_galaxy, .k-known_obscured_agn { --k: var(--violet); }
 .qi-bar { background: var(--k, var(--tx3)); }
 .tag {

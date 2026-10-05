@@ -136,6 +136,12 @@ def run(ctx: JobContext) -> dict:
         if not tags:
             continue
         flags = list(tags)
+        if "HIGH_VELOCITY" in tags and r.get("RV") is not None:
+            v_gc = _galactocentric_speed(r)
+            if v_gc:
+                d["v_galactocentric"] = round(v_gc)
+                if v_gc > 550:
+                    flags.append("POSSIBLY_UNBOUND")
         if not sb:
             flags.append("NOT_IN_SIMBAD")
             novelty = 1.0
@@ -147,7 +153,7 @@ def run(ctx: JobContext) -> dict:
         if "WHITE_DWARF" in tags and i not in gf21 and "WD" not in otype:
             flags.append("NOT_IN_WD_CATALOG")
             novelty = max(novelty, 0.8)
-        if novelty == 0 and not include_known:
+        if novelty == 0 and not include_known and not ctx.db.has_candidate(f"stellar:{r['Source']}"):
             continue
         weight = {"HIGH_VELOCITY": 0.35, "HIDDEN_COMPANION": 0.25, "ULTRACOOL": 0.3, "WHITE_DWARF": 0.25, "NEARBY": 0.15}
         score = min(1.0, 0.5 * novelty + max(weight[t] for t in tags) + 0.05 * (len(tags) - 1))
@@ -195,3 +201,19 @@ def _clean_photometry(excess: float | None, bprp: float | None) -> bool:
     if excess is None or bprp is None:
         return True  # no colour: nothing to test, rely on the other cuts
     return 1.0 + 0.015 * bprp**2 < excess < 1.3 + 0.06 * bprp**2
+
+
+def _galactocentric_speed(r: dict) -> float | None:
+    """3-D speed relative to the Galactic Centre (needs a Gaia radial velocity)."""
+    try:
+        import astropy.units as u
+        from astropy.coordinates import Galactocentric, SkyCoord
+
+        c = SkyCoord(
+            ra=r["RA_ICRS"] * u.deg, dec=r["DE_ICRS"] * u.deg, distance=(1000.0 / r["Plx"]) * u.pc,
+            pm_ra_cosdec=r["pmRA"] * u.mas / u.yr, pm_dec=r["pmDE"] * u.mas / u.yr,
+            radial_velocity=r["RV"] * u.km / u.s,
+        ).transform_to(Galactocentric())
+        return float(np.sqrt(c.v_x**2 + c.v_y**2 + c.v_z**2).to_value(u.km / u.s))
+    except Exception:
+        return None

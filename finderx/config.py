@@ -48,6 +48,7 @@ VZ_GAIA_QSO = "I/356/qsocand"
 VZ_GAIA_GAL = "I/356/galcand"
 VZ_ALLWISE = "II/328/allwise"
 VZ_MILLIQUAS = "VII/294/catalog"
+VZ_QUAIA = "J/ApJ/964/69/quaiag200"   # Gaia-unWISE quasar catalogue, G < 20
 VZ_VSX = "B/vsx/vsx"
 VZ_TESS_EB = "J/ApJS/258/16/tess-ebs"
 

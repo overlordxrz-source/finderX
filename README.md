@@ -22,7 +22,7 @@ Python 3.10+. No API keys. Everything is public data.
 |---|---|---|---|
 | **EXO** | TESS light curves (SPOC 2-min, TESS-SPOC & QLP full-frame) via MAST | Transiting planets, eclipsing binaries, periodic variable stars | Planets → ExoFOP **CTOI**. Variables & EBs → AAVSO **VSX** |
 | **STARS** | Gaia DR3 (VizieR mirror) × SIMBAD × Gentile Fusillo+21 | High-velocity halo/runaway stars, unstudied stars within 50 pc, hidden companions (RUWE > 2), ultracool dwarfs, white dwarfs nobody has catalogued | Literature / research note |
-| **DEEP** | Gaia DR3 QSO & galaxy classifier × AllWISE × Milliquas × SIMBAD × NED | Quasar candidates with no spectroscopic classification (strongest when Gaia, WISE colours and zero motion all agree), dust-obscured AGN, uncatalogued galaxies | Spectroscopic follow-up lists |
+| **DEEP** | Gaia DR3 QSO & galaxy classifier × AllWISE × Milliquas × Quaia × SIMBAD × NED | Quasar candidates with no spectroscopic classification (strongest when Gaia, WISE colours and zero motion all agree), dust-obscured AGN, uncatalogued galaxies | Spectroscopic follow-up lists |
 | **SOLAR** | MPC NEO Confirmation Page, JPL close-approach API, IMCCE SkyBoT | Newly found objects still awaiting confirmation, upcoming close approaches, every known asteroid in a field with its motion | Watch only — see *Honest limits* |
 
 **PATROL** is the hands-off mode: it keeps drawing random, never-examined
@@ -49,6 +49,10 @@ pass / warn / fail state and a one-line explanation:
 - implied radius, single-event dominance, proximity to data gaps
 - centroid shift during transit, and **every Gaia neighbour within two TESS
   pixels bright enough to fake the dip** if it were an eclipsing binary
+- **common-mode systematics**: every event's mid-time goes into a per-sector
+  register; a "transit" that lands at the same instants as dips on other,
+  unrelated stars is the spacecraft, not a planet, and is filed away
+  (retroactively too, as the register fills up)
 - catalogue cross-match: TOI, CTOI, NASA Exoplanet Archive, TESS EB catalogue,
   VSX, Gaia DR3 variability
 

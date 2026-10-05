@@ -58,6 +58,7 @@ const FLAGS = {
   NOT_IN_SIMBAD: ["good", "no SIMBAD entry at all"],
   BARELY_STUDIED: ["good", "SIMBAD lists ≤ 2 papers"],
   NOT_IN_WD_CATALOG: ["good", "missing from the Gentile Fusillo 2021 white-dwarf catalogue"],
+  POSSIBLY_UNBOUND: ["good", "faster than ~550 km/s relative to the Galaxy — near or above escape speed"],
   HIGH_VELOCITY: ["info", "tangential speed > 400 km/s — halo or runaway star"],
   NEARBY: ["info", "within 50 parsecs"],
   HIDDEN_COMPANION: ["info", "astrometric wobble (RUWE > 2) — unseen companion likely"],
@@ -532,12 +533,13 @@ function metricsFor(c) {
   ]);
   if (c.engine === "stellar") return kv([
     ["distance", `${num(m.dist_pc, 1)} pc`], ["G", num(m.G, 2)], ["BP−RP", num(m.bp_rp, 2)], ["M_G", num(m.M_G, 2)],
-    ["proper motion", `${num(m.pm, 1)} mas/yr`], ["v_tan", `${num(m.v_tan, 0)} km/s`], ["RUWE", num(m.ruwe, 2)],
+    ["proper motion", `${num(m.pm, 1)} mas/yr`], ["v_tan", `${num(m.v_tan, 0)} km/s`],
+    ["v (Galactocentric)", m.v_galactocentric ? `${m.v_galactocentric} km/s` : null], ["RUWE", num(m.ruwe, 2)],
     ["radial velocity", m.rv != null ? `${num(m.rv, 1)} km/s` : null], ["SIMBAD", m.simbad_type ? `${esc(m.simbad_type)} · ${m.simbad_refs} refs` : "none"],
   ]);
   return kv([
     ["P(quasar)", m.p_qso != null ? num(m.p_qso, 3) : null], ["P(galaxy)", m.p_gal != null ? num(m.p_gal, 3) : null],
-    ["redshift (Gaia)", m.z_qsoc ?? m.z_gal ? num(m.z_qsoc ?? m.z_gal, 3) : null], ["G", num(m.G, 2)],
+    ["redshift (Gaia)", m.z_qsoc ?? m.z_gal ? num(m.z_qsoc ?? m.z_gal, 3) + (m.z_qsoc != null && !m.z_qsoc_reliable ? " (flagged, may be aliased)" : "") : null], ["G", num(m.G, 2)],
     ["W1−W2", num(m["W1-W2"], 2)], ["W1 · W2", m.W1 != null ? `${num(m.W1, 2)} · ${num(m.W2, 2)}` : null],
     ["parallax", m.parallax != null ? `${num(m.parallax, 2)} ± ${num(m.parallax_err, 2)} mas` : null],
   ]);
