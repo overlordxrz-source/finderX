@@ -160,13 +160,14 @@ class JobContext:
 
 
 class JobManager:
-    def __init__(self, db: dbmod.DB | None = None, workers: int = 3):
+    def __init__(self, db: dbmod.DB | None = None, workers: int = 3, reap: bool = False):
         self.db = db or dbmod.get()
         self.bus = EventBus()
         self.pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="job")
         self.active: dict[str, JobContext] = {}
         self._lock = threading.Lock()
-        self.db.reap_stale_jobs()
+        if reap:  # only the long-lived server owns "running" rows; a CLI run must not touch them
+            self.db.reap_stale_jobs()
 
     def submit(self, engine: str, params: dict) -> str:
         from .engines import ENGINES

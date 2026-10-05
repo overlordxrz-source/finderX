@@ -21,7 +21,7 @@ _health_cache: dict = {"at": 0.0, "data": None}
 
 def create_app(manager: JobManager | None = None) -> FastAPI:
     app = FastAPI(title="finderX", version=__version__, docs_url="/api/docs")
-    m = manager or JobManager()
+    m = manager or JobManager(reap=True)
     app.state.jobs = m
     started = time.time()
 

@@ -21,7 +21,7 @@ from ..jobs import JobContext
 
 STAGES = ["GAIA", "SELECT", "SIMBAD", "WD-CAT", "SCORE"]
 
-_COLS = 'Source, RA_ICRS, DE_ICRS, Plx, e_Plx, pmRA, pmDE, Gmag, "BP-RP", RUWE, RV'
+_COLS = 'Source, RA_ICRS, DE_ICRS, Plx, e_Plx, pmRA, pmDE, Gmag, "BP-RP", RUWE, RV, "E(BP/RP)"'
 _BINARY_TYPES = ("**", "SB*", "EB*", "El*", "*i*", "BD*")
 
 
@@ -61,19 +61,27 @@ def run(ctx: JobContext) -> dict:
         if bprp is not None and len(hr_bg) < 6000:
             hr_bg.append((round(bprp, 3), round(mg, 3)))
         tags = []
-        if vtan > 400 and plx / e_plx > 8 and (ruwe or 9) < 1.4:
+        # Blends and crowding fake both faint absolute magnitudes and large
+        # parallaxes; keep only sources whose BP/RP flux excess sits on the
+        # single-star locus (Riello+21 / Evans+18) and that are not too faint.
+        clean = _clean_photometry(r.get("E(BP/RP)"), bprp) and g < 20.0
+        single = (ruwe or 9) < 1.4
+        snr = plx / e_plx
+        if vtan > 400 and snr > 8 and single and clean:
             tags.append("HIGH_VELOCITY")
-        if plx > 20 and plx / e_plx > 10:
+        if plx > 20 and snr > 10 and single and clean:
             tags.append("NEARBY")
-        if plx > 10 and (ruwe or 0) > 2.0 and g < 18:
+        if plx > 10 and (ruwe or 0) > 2.0 and g < 17 and snr > 20 and clean:
             tags.append("HIDDEN_COMPANION")
-        if plx > 10 and mg > 15 and (bprp is None or bprp > 3.0):
+        if plx > 10 and mg > 15 and snr > 10 and single and (bprp is None or bprp > 3.0):
             tags.append("ULTRACOOL")
-        if bprp is not None and mg > 9 and mg > 3.1 * bprp + 9.2 and plx / e_plx > 8:
+        if bprp is not None and 9 < mg < 16.5 and mg > 3.1 * bprp + 9.2 and snr > 10 and single and clean:
             tags.append("WHITE_DWARF")
         if tags:
             picks.append((r, tags, d))
-    ctx.log(f"{len(picks)} stars pass a hunt criterion", src="SELECT")
+    if len(rows) >= 40000:
+        ctx.log("field is crowded (hit the 40,000-star cap) — expect blends; prefer a smaller radius", level="warn", src="SELECT")
+    ctx.log(f"{len(picks)} stars pass a hunt criterion (quality cuts: RUWE, BP/RP excess, G < 20)", src="SELECT")
     ctx.stage("SELECT", "ok")
     if not picks:
         ctx.result({"kind": "summary", "stars": len(rows), "picks": 0})
@@ -181,3 +189,9 @@ def run(ctx: JobContext) -> dict:
     ctx.log(f"{emitted} stellar candidates logged", src="STELLAR")
     ctx.result({"kind": "summary", "stars": len(rows), "picks": len(picks), "candidates": emitted})
     return {"stars": len(rows), "picks": len(picks), "candidates": emitted}
+
+
+def _clean_photometry(excess: float | None, bprp: float | None) -> bool:
+    if excess is None or bprp is None:
+        return True  # no colour: nothing to test, rely on the other cuts
+    return 1.0 + 0.015 * bprp**2 < excess < 1.3 + 0.06 * bprp**2

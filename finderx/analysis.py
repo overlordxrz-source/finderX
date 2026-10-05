@@ -34,6 +34,8 @@ class Star:
     @classmethod
     def from_meta(cls, meta: dict) -> "Star":
         r, logg = meta.get("radius"), meta.get("logg")
+        if r is not None and not (0.05 < r < 500):
+            r = None  # TIC placeholders / bad fits
         m = None
         if r and logg:
             m = 10 ** (logg - 4.438) * r * r

@@ -194,7 +194,7 @@ def _process(ctx: JobContext, tic: int, products: list[dict], include_known: boo
     lcs = []
     for prod in products:
         try:
-            lcs.append(L.fetch(prod))
+            lcs.append(L.fetch(prod, cache=include_known))  # keep files only for targeted looks
         except Exception as exc:
             ctx.log(f"{label} S{prod.get('sequence_number')}: download failed ({exc})", level="warn", src="MAST")
     if not lcs:
@@ -241,7 +241,7 @@ def _process(ctx: JobContext, tic: int, products: list[dict], include_known: boo
         signals = [s for s in signals if s not in residual]
         for s in signals:
             s.flags.append("VARIABLE_HOST")
-    reportable = [s for s in signals if s.kind == "planet_candidate" or (s.kind == "eclipsing_binary" and s.snr >= 10)]
+    reportable = [s for s in signals if s.kind == "planet_candidate" or _solid_eb(s)]
     if eclipsing_var and any(s.kind == "eclipsing_binary" and catalogs.period_match(var.true_period, s.period, 0.02) for s in signals):
         var = None  # the EB itself; already reported by the transit search
 
@@ -317,7 +317,9 @@ def _process(ctx: JobContext, tic: int, products: list[dict], include_known: boo
             else:
                 kind = "known_variable"
         score = sig.score * (0.25 if matched else 1.0)
-        rp = f" · {sig.rp_earth:.1f} R⊕" if sig.rp_earth else ""
+        rp = f" · {sig.rp_earth:.1f} R⊕" if sig.rp_earth and kind != "eclipsing_binary" else ""
+        # alternating depths: the real orbit is twice the BLS period
+        shown_p = sig.period * (2 if sig.kind == "eclipsing_binary" and "ODD_EVEN_MISMATCH" in sig.flags else 1)
         if not payload_saved:
             ctx.db.payload_put(pid, payload)
             payload_saved = True
@@ -327,17 +329,20 @@ def _process(ctx: JobContext, tic: int, products: list[dict], include_known: boo
                 "engine": "transit",
                 "kind": kind,
                 "dedupe": f"transit:{tic}:{sig.kind}:{sig.period:.3f}",
-                "title": f"{label} · P {sig.period:.4f} d",
+                "title": f"{label} · P {shown_p:.4f} d",
                 "subtitle": f"{sig.depth * 1e6:,.0f} ppm{rp} · SNR {sig.snr:.1f} · {sig.n_transits} transits",
                 "score": round(score, 3),
                 "known": known,
                 "flags": sig.flags,
-                "metrics": {**sig.to_dict(), "depth_ppm": round(sig.depth * 1e6, 1), "duration_h": round(sig.duration * 24, 3), "star": star_info, "contaminants": contaminants},
+                "metrics": {**sig.to_dict(), "orbital_period": round(shown_p, 7), "depth_ppm": round(sig.depth * 1e6, 1), "duration_h": round(sig.duration * 24, 3), "star": star_info, "contaminants": contaminants},
             }
         )
         emitted += 1
         outcome = kind
 
+    if var and var.ptp_ppm > 1.5e6 and var.type_guess not in ("RRAB", "EA"):
+        ctx.log(f"{label} {var.ptp_ppm / 1e4:.0f}% swing looks instrumental — skipped", level="debug", src="VET")
+        var = None
     if var:
         known = []
         for v in vsx:
@@ -374,6 +379,15 @@ def _process(ctx: JobContext, tic: int, products: list[dict], include_known: boo
 
     ctx.stage("XMATCH", "ok", label)
     ctx.mark(str(tic), outcome)
+
+
+def _solid_eb(s: A.TransitSignal) -> bool:
+    """An eclipsing-binary call worth a human's time, not giant-star noise."""
+    if s.kind != "eclipsing_binary" or s.snr < 12:
+        return False
+    if {"SINGLE_EVENT_DOMINATED", "NEAR_DATA_GAPS", "TESS_ORBIT_ALIAS"} & set(s.flags):
+        return False
+    return s.n_transits >= 3 or s.secondary_snr > 5 or s.odd_even_sigma > 6
 
 
 def _contaminants(ra: float, dec: float, tmag: float | None, depth: float) -> list[dict]:

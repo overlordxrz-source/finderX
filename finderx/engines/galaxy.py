@@ -186,11 +186,14 @@ def run(ctx: JobContext) -> dict:
         if c["kind"] == "obscured_agn" and emitted > 60:
             continue
         m = c["m"]
-        sub = {
-            "quasar": f"quasar candidate · P={m.get('p_qso') or 0:.2f}" + (f" · z≈{m['z_qsoc']:.2f}" if m.get("z_qsoc") else "") + (f" · W1−W2 {m['W1-W2']:.2f}" if m.get("W1-W2") is not None else ""),
-            "galaxy": f"galaxy candidate · P={m.get('p_gal') or 0:.2f}" + (f" · z≈{m['z_gal']:.3f}" if m.get("z_gal") else ""),
-            "obscured_agn": f"mid-IR AGN, no optical counterpart · W1−W2 {m['W1-W2']:.2f}",
-        }[c["kind"]]
+        if c["kind"] == "quasar":
+            sub = f"quasar candidate · P={m.get('p_qso') or 0:.2f}"
+            sub += f" · z≈{m['z_qsoc']:.2f}" if m.get("z_qsoc") else ""
+            sub += f" · W1−W2 {m['W1-W2']:.2f}" if m.get("W1-W2") is not None else ""
+        elif c["kind"] == "galaxy":
+            sub = f"galaxy candidate · P={m.get('p_gal') or 0:.2f}" + (f" · z≈{m['z_gal']:.3f}" if m.get("z_gal") else "")
+        else:
+            sub = f"mid-IR AGN, no optical counterpart · W1−W2 {m['W1-W2']:.2f}"
         ctx.candidate(
             {
                 "engine": "galaxy",

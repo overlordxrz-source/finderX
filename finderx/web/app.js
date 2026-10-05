@@ -516,7 +516,9 @@ function metricsFor(c) {
   const m = c.metrics || {};
   const st = m.star || {};
   if (c.engine === "transit") return kv([
-    ["period", `${num(m.period, 5)} d`], ["epoch (BTJD)", num(m.t0, 4)], ["depth", `${num(m.depth_ppm, 0)} ppm`],
+    ["period", `${num(m.period, 5)} d`],
+    ["orbital period", m.orbital_period && Math.abs(m.orbital_period - m.period) > 1e-6 ? `${num(m.orbital_period, 5)} d (alternating depths)` : null],
+    ["epoch (BTJD)", num(m.t0, 4)], ["depth", `${num(m.depth_ppm, 0)} ppm`],
     ["duration", `${num(m.duration_h, 2)} h`], ["planet radius", m.rp_earth ? `${num(m.rp_earth, 2)} R⊕` : null],
     ["SNR · SDE", `${num(m.snr, 1)} · ${num(m.sde, 1)}`], ["transits", m.n_transits],
     ["host Tmag", num(st.tmag, 2)], ["host Teff", st.teff ? `${num(st.teff, 0)} K` : null], ["host radius", st.radius ? `${num(st.radius, 2)} R☉` : null],

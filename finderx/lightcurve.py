@@ -222,8 +222,10 @@ def load(fits_bytes: bytes, provenance: str = "") -> LightCurve:
     cc = cc[order] if cc is not None else None
     cr = cr[order] if cr is not None else None
     med = np.nanmedian(f)
-    if not np.isfinite(med) or med == 0:
+    if not np.isfinite(med) or med <= 0:
         raise ValueError("light curve has no usable flux")
+    if robust_std(f / med) > 0.25:
+        raise ValueError("light curve too noisy to search (faint or background-dominated)")
     f = f / med
     fe = fe / med
     if not np.isfinite(fe).any():
@@ -232,8 +234,8 @@ def load(fits_bytes: bytes, provenance: str = "") -> LightCurve:
     return LightCurve(tic, sector, provenance, cadence_s, t, f, fe, cc, cr, meta)
 
 
-def fetch(product: dict) -> LightCurve:
-    raw = net.mast_download(product["dataURL"])
+def fetch(product: dict, cache: bool = False) -> LightCurve:
+    raw = net.mast_download(product["dataURL"], cache=cache)
     return load(raw, product.get("provenance_name", ""))
 
 

@@ -54,7 +54,8 @@ def text(c: dict) -> str:
         lines += [
             f"TIC ID              {star.get('tic')}",
             f"Sectors             {', '.join(map(str, star.get('sectors', [])))}  ({star.get('provenance')})",
-            f"Period (d)          {m.get('period'):.6f}",
+            f"Period (d)          {m.get('orbital_period') or m.get('period'):.6f}"
+            + ("   (BLS found half of this; depths alternate)" if (m.get("orbital_period") or m["period"]) != m["period"] else ""),
             f"Epoch (BTJD)        {m.get('t0'):.5f}     (BJD {m.get('t0', 0) + BTJD_OFFSET:.5f})",
             f"Duration (h)        {m.get('duration_h'):.3f}",
             f"Depth (ppm)         {m.get('depth_ppm'):.0f} ± {m.get('depth_err', 0) * 1e6:.0f}",
