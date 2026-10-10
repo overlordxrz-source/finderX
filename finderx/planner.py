@@ -101,7 +101,8 @@ def predict(cands: list[dict], observer: dict, days: float = 14.0, now: datetime
             lead = next((s for s in pix.get("sectors", []) if s["sector"] == pix.get("lead_sector")), None)
             best = (lead or {}).get("best")
             if best:
-                g = _gaia_position(best["gaia"])
+                src = pix.get("source") or {}
+                g = (src["ra"], src["dec"]) if src.get("ra") is not None else _gaia_position(best["gaia"])
                 if g:
                     ra, dec = g
                     star_label = f"Gaia DR3 {best['gaia']} (G {best['G']})"

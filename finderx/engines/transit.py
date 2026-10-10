@@ -382,7 +382,8 @@ def _process(ctx: JobContext, tic: int, products: list[dict], include_known: boo
                 **base,
                 "engine": "transit",
                 "kind": kind,
-                "dedupe": f"transit:{tic}:{sig.kind}:{sig.period:.3f}",
+                # a re-run that fixes a period alias refreshes the old entry instead of filing a twin
+                "dedupe": ctx.db.harmonic_twin(label, "transit", sig.period, ctx.id) or f"transit:{tic}:{sig.kind}:{sig.period:.3f}",
                 "title": f"{label} · P {shown_p:.4f} d",
                 "subtitle": f"{sig.depth * 1e6:,.0f} ppm{rp} · SNR {sig.snr:.1f} · {sig.n_transits} transits",
                 "score": round(score, 3),

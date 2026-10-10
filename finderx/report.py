@@ -33,8 +33,31 @@ _ROUTES = {
 }
 
 
-def route(kind: str) -> tuple[str, str]:
+SOURCE_STATUS = {
+    "known": "already in VSX / Gaia DR3 with this period — nothing new to submit",
+    "period_differs": "catalogued with a different period — if the TESS period holds up, that entry can be revised",
+    "no_period": "catalogued as variable but no period is published — you can supply it",
+    "uncatalogued": "not in VSX or the Gaia DR3 variability catalogue — a new variable star",
+}
+
+
+def route(kind: str, c: dict | None = None) -> tuple[str, str]:
+    src = (((c or {}).get("metrics") or {}).get("pixels") or {}).get("source")
+    if src and src["status"] in ("period_differs", "no_period"):
+        return (
+            "AAVSO VSX (revise an existing entry)",
+            f"https://www.aavso.org/vsx/ — find the entry for Gaia DR3 {src['gaia']} and use 'Revise' to add or correct "
+            "the period. Cite the TESS sectors and attach the folded light curve.",
+        )
+    if src and src["status"] == "uncatalogued":
+        return (
+            "AAVSO VSX (new variable at the Gaia position)",
+            f"https://www.aavso.org/vsx/ — submit Gaia DR3 {src['gaia']} (RA {src['ra']:.6f}, Dec {src['dec']:+.6f}), "
+            "not the TIC target: the pixel check shows the TESS signal comes from it.",
+        )
     k = kind.replace("known_", "")
+    if k == "blend":
+        k = "eclipsing_binary"
     if k in _ROUTES:
         return _ROUTES[k]
     return ("Literature / SIMBAD", "Write it up (a research note in RNAAS is the lightest path) so SIMBAD can index it.")
@@ -43,7 +66,7 @@ def route(kind: str) -> tuple[str, str]:
 def text(c: dict) -> str:
     m = c.get("metrics") or {}
     star = m.get("star") or {}
-    title, how = route(c["kind"])
+    title, how = route(c["kind"], c)
     lines = [
         f"finderX candidate {c['id']} — {c['title']}",
         f"kind: {c['kind']}    status: {c['status']}    score: {c.get('score', 0):.2f}",
@@ -96,11 +119,21 @@ def text(c: dict) -> str:
             lines.append(f"  S{sec['sector']}: {sec['verdict'].replace('_', ' ')} · {sec['n_events']} events · peak SNR {sec.get('peak_snr')}")
         if pix["verdict"] == "off_target" and pix.get("sectors"):
             best = next((s["best"] for s in pix["sectors"] if s["sector"] == pix.get("lead_sector")), None)
+            src = pix.get("source") or {}
             if best:
-                lines.append(f"  → the variable star is Gaia DR3 {best['gaia']} (G {best['G']}); submit it, not the TIC target.")
-    if c.get("known"):
+                lines.append(f"  → the star that varies is Gaia DR3 {best['gaia']} (G {best['G']}), not the TIC target.")
+            if src:
+                lines.append(f"  → catalogue status: {SOURCE_STATUS[src['status']]}")
+                for e in src.get("entries", []):
+                    lines.append(f"      {e['label']}  {e.get('type') or ''}  P={e.get('period')}  match={e.get('match')}")
+        arc = pix.get("archival")
+        if arc and arc.get("verdict") not in (None, "no_data", "no_coverage"):
+            lines.append(f"Archival photometry (PS1 / Gaia epochs): {arc['verdict'].replace('_', ' ')} — {arc['reason']}")
+    if [k for k in c.get("known") or [] if not k.get("source")]:
         lines += ["", "Catalogue matches"]
         for k in c["known"]:
+            if k.get("source"):
+                continue
             lines.append(f"  {k.get('kind'):<10} {k.get('label')}  {k.get('type') or ''}  P={k.get('period')}  match={k.get('match')}")
     if c.get("note"):
         lines += ["", f"Your note: {c['note']}"]

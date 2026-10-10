@@ -183,3 +183,49 @@ def gaia_eb_periods(source_ids: list) -> dict[int, float]:
         return {}
     rows = net.tap(config.VIZIER_TAP, f'SELECT Source, Freq FROM "I/358/veb" WHERE Source IN ({ids})', timeout=40)
     return {int(r["Source"]): 1.0 / r["Freq"] for r in rows if r.get("Freq")}
+
+
+EB_TYPES = ("E", "EA", "EB", "EW", "ELL")
+
+
+def _is_eb(vsx_type: str | None = None, gaia_class: str | None = None) -> bool:
+    parts = (vsx_type or "").upper().replace("+", "|").split("|")
+    return gaia_class == "ECL" or any(p.strip(" :").split("/")[0] in EB_TYPES for p in parts)
+
+
+def identify_source(gaia_id: str, period: float) -> dict:
+    """What the catalogues already say about a star the pixel check blamed.
+
+    ``status`` is one of
+    ``known``          – VSX or Gaia lists it with the TESS period (or a 2:1/1:2/3:1 harmonic)
+    ``period_differs`` – catalogued as variable with a period TESS contradicts
+    ``no_period``      – catalogued as variable, no period anywhere
+    ``uncatalogued``   – neither VSX nor Gaia DR3 lists it as variable
+    """
+    sid = int(gaia_id)
+    pos = net.tap(config.VIZIER_TAP, f'SELECT RA_ICRS, DE_ICRS FROM "{config.VZ_GAIA}" WHERE Source = {sid}', timeout=40)
+    if not pos:
+        raise LookupError(f"Gaia DR3 {gaia_id} not found")
+    ra, dec = pos[0]["RA_ICRS"], pos[0]["DE_ICRS"]
+    entries: list[dict] = []
+    cls = net.tap(config.VIZIER_TAP, f'SELECT Source, Class FROM "I/358/vclassre" WHERE Source = {sid}', timeout=40)
+    gaia_class = str(cls[0]["Class"]).strip() if cls else None
+    if gaia_class:
+        gp = gaia_eb_periods([sid]).get(sid)
+        entries.append({"kind": "gaia_var", "label": f"Gaia DR3 {sid}", "type": gaia_class,
+                        "period": round(gp, 6) if gp else None, "match": period_match(period, gp) if gp else None})
+    for v in vsx_cone(ra, dec, 5.0):
+        vp = v.get("Period")
+        entries.append({"kind": "vsx", "label": str(v.get("Name", "")).strip(), "type": str(v.get("Type", "")).strip(),
+                        "period": vp, "match": period_match(period, vp, 0.005) if vp else None})
+    periods = [e for e in entries if e["period"]]
+    if any(e["match"] for e in entries):
+        status = "known"
+    elif periods:
+        status = "period_differs"
+    elif entries:
+        status = "no_period"
+    else:
+        status = "uncatalogued"
+    is_eb = any(_is_eb(e["type"]) if e["kind"] == "vsx" else _is_eb(gaia_class=e["type"]) for e in entries)
+    return {"gaia": str(sid), "ra": ra, "dec": dec, "status": status, "is_eb": is_eb, "entries": entries}

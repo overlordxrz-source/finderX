@@ -100,7 +100,7 @@ def create_app(manager: JobManager | None = None) -> FastAPI:
         c = m.db.candidate(cid)
         if not c:
             raise HTTPException(404, "no such candidate")
-        c["route"] = report.route(c["kind"])
+        c["route"] = report.route(c["kind"], c)
         return c
 
     @app.post("/api/candidates/{cid}/vote")

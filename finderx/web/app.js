@@ -62,6 +62,10 @@ const FLAGS = {
   PIXELS_OFF_TARGET: ["bad", "TESS difference image: a neighbouring star is dimming, not the target"],
   PIXELS_AMBIGUOUS: ["warn", "TESS difference image cannot separate the target from a neighbour"],
   PIXELS_INCONCLUSIVE: ["warn", "signal too weak in individual pixels to locate"],
+  SOURCE_CATALOGUED: ["bad", "the star that really varies is already in VSX / Gaia with this period"],
+  SOURCE_PERIOD_DIFFERS: ["good", "the star that varies is catalogued with a different period — a revision you can submit"],
+  SOURCE_LACKS_PERIOD: ["good", "the star that varies is catalogued without a period — you can add it"],
+  SOURCE_UNCATALOGUED: ["good", "the star that varies is in no variability catalogue — a new variable"],
   VARIABLE_HOST: ["warn", "the star itself pulsates or rotates; the dip was found after removing that signal"],
   NEARBY_CONTAMINANT: ["warn", "a nearby Gaia star could produce this dip if it were an eclipsing binary"],
   VSX_ENTRY_LACKS_PERIOD: ["good", "VSX knows the star but has no period — you can add it"],
@@ -634,6 +638,7 @@ function renderDossier(c) {
 }
 
 // ── pixel check (TESS difference imaging) ────────────────────────────
+const SOURCE_STATUS = { known: "ALREADY CATALOGUED", period_differs: "CATALOGUED · PERIOD DIFFERS", no_period: "CATALOGUED · NO PERIOD", uncatalogued: "UNCATALOGUED" };
 const VERDICT = {
   on_target: ["ON TARGET", "var(--green)"], off_target: ["ON A NEIGHBOUR", "var(--red)"],
   ambiguous: ["AMBIGUOUS", "var(--gold)"], inconclusive: ["INCONCLUSIVE", "var(--tx2)"],
@@ -642,8 +647,11 @@ function pixelSection(c) {
   const p = c.metrics?.pixels;
   if (!p) return `<div class="d-sec"><div class="d-sh">PIXEL CHECK</div><div class="hint" style="padding:0 14px 8px">Which star is dimming? Compares TESS pixels in and out of transit and fits every Gaia star in the cutout (~20 s).</div><div class="d-actions"><button class="btn" id="d-pixels">RUN PIXEL CHECK</button></div></div>`;
   const [label, color] = VERDICT[p.verdict] || [p.verdict, "var(--tx2)"];
+  const src = p.source;
+  const srcColor = { known: "var(--tx2)", period_differs: "var(--green)", no_period: "var(--green)", uncatalogued: "var(--green)" }[src?.status];
+  const srcHtml = src ? `<div class="pix-verdict" style="--vc:${srcColor}"><b>SOURCE · ${esc(SOURCE_STATUS[src.status] || src.status)}</b><span>Gaia DR3 ${esc(src.gaia)} · G ${num(src.G, 2)}${(src.entries || []).map((e) => ` · ${esc(e.label)} ${esc(e.type || "")}${e.period ? " P " + num(e.period, 5) + " d" : ""}${e.match ? " ✓" : ""}`).join("")}</span></div>` : "";
   return `<div class="d-sec"><div class="d-sh">PIXEL CHECK <span class="dim">· maps in FIELD view (3)</span></div>
-    <div class="pix-verdict" style="--vc:${color}"><b>${label}</b><span>${esc(p.reason)}</span></div>
+    <div class="pix-verdict" style="--vc:${color}"><b>${label}</b><span>${esc(p.reason)}</span></div>${srcHtml}
     <div class="d-actions"><button class="btn" id="d-pixmaps">SHOW PIXEL MAPS</button><button class="btn" id="d-pixels">RE-RUN</button></div></div>`;
 }
 

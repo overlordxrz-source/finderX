@@ -116,31 +116,92 @@ def ephemeris_sigma(period: float, duration: float, snr: float, n_transits: int,
     return sigma_t0, sigma_p
 
 
-def eclipse_test(lc: dict, period: float, t_ref: float, duration: float, depth: float, sigma_t0: float, sigma_p: float) -> dict:
-    """Δχ² between 'this star eclipses by `depth`' and 'constant'."""
+def eclipse_template(t: np.ndarray, f: np.ndarray, period: float, t_ref: float, duration: float) -> dict:
+    """The TESS eclipse profile folded on ``period``: dimming vs time from t_ref.
+
+    Archival points are sparse and land anywhere in an eclipse, including
+    ingress and egress, so they are compared with the real shape rather
+    than a box. Dimming is relative to the out-of-eclipse median and set to
+    zero where it is not significant.
+    """
+    width = max(duration / 10, 2 / 1440)
+    nb = int(min(6000, max(50, period / width)))
+    dt = (((t - t_ref) / period + 0.5) % 1.0 - 0.5) * period
+    edges = np.linspace(-period / 2, period / 2, nb + 1)
+    idx = np.clip(np.digitize(dt, edges) - 1, 0, nb - 1)
+    med = np.full(nb, np.nan)
+    for i in np.unique(idx):
+        med[i] = np.median(f[idx == i])
+    centres = (edges[:-1] + edges[1:]) / 2
+    ok = np.isfinite(med)
+    med = np.interp(centres, centres[ok], med[ok], period=period)
+    out = np.abs(centres) > duration
+    base = float(np.median(med[out])) if out.any() else float(np.median(med))
+    dim = 1.0 - med / base
+    noise = float(np.median(np.abs(dim[out] - np.median(dim[out])))) * 1.4826 if out.sum() > 5 else 0.0
+    dim[dim < 3 * noise] = 0.0
+    return {"dt": centres, "dim": dim, "period": period}
+
+
+def _template_dimming(tmpl: dict, dt: np.ndarray, sig_t: np.ndarray) -> np.ndarray:
+    """Template dimming at each dt, smeared by the ephemeris uncertainty."""
+    P = tmpl["period"]
+    offs = np.linspace(-2, 2, 9)
+    w = np.exp(-0.5 * offs**2)
+    w /= w.sum()
+    out = np.zeros_like(dt, dtype=float)
+    for o, wi in zip(offs, w):
+        x = ((dt + o * sig_t) / P + 0.5) % 1.0 * P - P / 2
+        out += wi * np.interp(x, tmpl["dt"], tmpl["dim"], period=P)
+    return out
+
+
+def eclipse_test(lc: dict, period: float, t_ref: float, duration: float, depth: float, sigma_t0: float, sigma_p: float,
+                 template: dict | None = None, scale: float = 1.0) -> dict:
+    """Δχ² between 'this star eclipses by `depth`' and 'constant'.
+
+    With a TESS ``template`` the expected dimming follows the measured
+    eclipse shape (times ``scale`` for a fainter star that would need a
+    deeper eclipse); otherwise a box of ``depth`` is assumed.
+    """
     t, f, e = lc["t"], lc["f"], lc["e"]
     n_cyc = (t - t_ref) / period
     dt = (n_cyc - np.round(n_cyc)) * period          # time from the nearest predicted mid-eclipse
     sig_t = np.sqrt(sigma_t0**2 + (np.abs(n_cyc) * sigma_p) ** 2)
     usable = sig_t < duration * 1.5
-    inn = usable & (np.abs(dt) < duration / 2 + 1.0 * sig_t)
-    model = np.where(inn, 1.0 - depth, 1.0)
+    if template is not None:
+        dim = np.minimum(_template_dimming(template, dt, sig_t) * scale, 1.0)
+        inn = usable & (dim > 0.25 * depth)
+        model = np.where(usable, 1.0 - dim, 1.0)
+    else:
+        inn = usable & (np.abs(dt) < duration / 2 + 1.0 * sig_t)
+        model = np.where(inn, 1.0 - depth, 1.0)
     chi_const = np.sum(((f - 1.0) / e)[usable] ** 2)
     chi_ecl = np.sum(((f - model) / e)[usable] ** 2)
+    # also let the depth float: catalogued TESS depths can be off by several ×
+    # (dilution, product-specific background), so "did it dim at all?" matters
+    shape = (1.0 - model)[usable]
+    w = 1.0 / e[usable] ** 2
+    den = float(np.sum(w * shape**2))
+    a = max(0.0, float(np.sum(w * shape * (1.0 - f[usable])) / den)) if den > 0 else 0.0
+    chi_fit = np.sum(((f[usable] - (1.0 - a * shape)) / e[usable]) ** 2)
     return {
         "n": int(usable.sum()),
         "n_in": int(inn.sum()),
         "dchi2": round(float(chi_const - chi_ecl), 1),
+        "dchi2_fit": round(float(chi_const - chi_fit), 1),
+        "depth_scale": round(a, 3),
         "in_points": [
-            {"t": round(float(a), 3), "f": round(float(b), 4), "e": round(float(c), 4)}
-            for a, b, c in zip(t[inn], f[inn], e[inn])
+            {"t": round(float(a), 3), "f": round(float(b), 4), "e": round(float(c), 4), "model": round(float(d), 4)}
+            for a, b, c, d in zip(t[inn], f[inn], e[inn], model[inn])
         ][:12],
         "timing_sigma_h": round(float(np.median(sig_t[usable]) * 24), 2) if usable.any() else None,
     }
 
 
 def check(ra: float, dec: float, period: float, t_ref: float, duration: float, depth: float,
-          stars: list[dict], target_gaia: str | None, sigma_t0: float, sigma_p: float, log=lambda m: None) -> dict:
+          stars: list[dict], target_gaia: str | None, sigma_t0: float, sigma_p: float, log=lambda m: None,
+          template: dict | None = None) -> dict:
     """Run the archival test for every star near the candidate."""
     lcs: dict[str, dict] = {}
     try:
@@ -181,7 +242,7 @@ def check(ra: float, dec: float, period: float, t_ref: float, duration: float, d
             continue
         if need >= 1.0:
             continue
-        res = eclipse_test(lc, period, t_ref, duration, need, sigma_t0, sigma_p)
+        res = eclipse_test(lc, period, t_ref, duration, need, sigma_t0, sigma_p, template, need / depth if depth > 0 else 1.0)
         if res["n_in"] == 0:
             continue
         sep_t = 3600 * math.hypot((lc["ra"] - ra) * math.cos(math.radians(dec)), lc["dec"] - dec)
@@ -192,21 +253,28 @@ def check(ra: float, dec: float, period: float, t_ref: float, duration: float, d
     rows.sort(key=lambda r: -r["dchi2"])
     best = rows[0]
     target_row = next((r for r in rows if r["is_target"]), None)
-    if best["dchi2"] >= 9 and (len(rows) == 1 or rows[1]["dchi2"] < best["dchi2"] - 6):
+    for r in rows:
+        r["dimmed"] = r["dchi2_fit"] >= 9            # significantly fainter at predicted eclipses, any depth
+        r["score"] = max(r["dchi2"], r["dchi2_fit"] if r["dimmed"] else -1e9)
+    rows.sort(key=lambda r: -r["score"])
+    best = rows[0]
+    if best["score"] >= 9 and (len(rows) == 1 or rows[1]["score"] < best["score"] - 6):
         who = "the target" if best["is_target"] else f"{best['id']} ({best['sep_arcsec']:.0f}″ away)"
         verdict = "caught_on_target" if best["is_target"] else "caught_on_neighbour"
-        reason = f"{best['survey']} caught {who} {best['n_in']}× inside a predicted eclipse, dimmer as expected (Δχ² {best['dchi2']:.0f})"
-    elif target_row and target_row["dchi2"] <= -9:
+        how = "dimmer as expected" if best["dchi2"] >= 9 else f"dimmer, at {best['depth_scale']:.0%} of the TESS-implied depth"
+        reason = f"{best['survey']} caught {who} {best['n_in']}× inside a predicted eclipse, {how} (Δχ² {best['score']:.0f})"
+    elif target_row and target_row["dchi2"] <= -9 and not target_row["dimmed"]:
         verdict = "target_ruled_out"
         reason = f"the target was at full brightness during {target_row['n_in']} predicted eclipse(s) (Δχ² {target_row['dchi2']:.0f})"
-    elif any(r["dchi2"] <= -9 and not r["is_target"] for r in rows):
-        ruled = [r for r in rows if r["dchi2"] <= -9 and not r["is_target"]]
+    elif any(r["dchi2"] <= -9 and not r["dimmed"] and not r["is_target"] for r in rows):
+        ruled = [r for r in rows if r["dchi2"] <= -9 and not r["dimmed"] and not r["is_target"]]
         verdict = "neighbours_excluded"
         reason = f"{len(ruled)} neighbour(s) were at full brightness mid-eclipse, so they are not the source"
     else:
         verdict = "inconclusive"
         reason = "archival points inside predicted eclipses do not single out a star"
     for r in rows:
-        r["status"] = "caught" if r["dchi2"] >= 9 else "excluded" if r["dchi2"] <= -9 else "—"
-    rows.sort(key=lambda r: (-(r["dchi2"] >= 9), -abs(r["dchi2"])))
+        r["status"] = "caught" if r["score"] >= 9 else "excluded" if r["dchi2"] <= -9 else "—"
+        r.pop("score")
+    rows.sort(key=lambda r: (-(r["status"] == "caught"), -abs(r["dchi2"])))
     return {"verdict": verdict, "reason": reason, "stars": rows[:12]}

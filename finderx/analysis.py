@@ -194,6 +194,14 @@ def transit_search(
         r2 = bls.power([P], fine, objective="likelihood", oversample=20)
         dur = float(r2.duration[0])
         t0 = float(r2.transit_time[0])
+        k_fund = _fundamental(tt, ff, P, t0, dur, min(pmin, 0.2))
+        if k_fund > 1:
+            log(f"signal {idx + 1}: dips recur every P/{k_fund} — adopting {P / k_fund:.5f} d instead of {P:.5f} d")
+            P /= k_fund
+            fine = np.linspace(max(0.4 * dur, 0.02), min(1.8 * dur, 0.3 * P), 24)
+            r2 = bls.power([P], fine, objective="likelihood", oversample=20)
+            dur = float(r2.duration[0])
+            t0 = float(r2.transit_time[0])
 
         st = bls.compute_stats(P, dur, t0)
         depth, depth_err = (float(st["depth"][0]), float(st["depth"][1]))
@@ -259,6 +267,43 @@ def transit_search(
         if keep.sum() < 200:
             break
     return signals, periodogram
+
+
+def _fundamental(t: np.ndarray, f: np.ndarray, P: float, t0: float, dur: float, pmin: float = 0.2, kmax: int = 40) -> int:
+    """Largest k for which the dip also appears at the extra epochs of P/k.
+
+    A deep, short-period eclipse makes a BLS peak so broad that the
+    running-median SDE flattens it, and a narrow multiple (2P, 3P, 5P …)
+    wins instead. Each candidate sub-period is tested only on the epochs it
+    adds: they must have data and show (nearly) the same dip. Transits that
+    merely fall in gaps cannot trigger it. Sub-periods below the BLS grid
+    (down to ``pmin``) are allowed: near-equal eclipses of a short binary
+    recur every half orbit.
+    """
+    dt_p = np.abs(fold(t, P, t0) * P)
+    out = dt_p > dur
+    if out.sum() < 50:
+        return 1
+    base = float(np.median(f[out]))
+    depth = base - float(np.median(f[dt_p < dur / 4])) if (dt_p < dur / 4).sum() >= 3 else 0.0
+    if depth <= 0:
+        return 1
+    best = 1
+    for k in range(2, kmax + 1):
+        q = P / k
+        if q < pmin or dur > 0.3 * q:
+            break
+        core = (np.abs(fold(t, q, t0) * q) < dur / 4) & (dt_p > dur)
+        if core.sum() < 6:
+            continue
+        epochs = np.round((t[core] - t0) / q)
+        dips = [base - float(np.median(f[core][epochs == e])) for e in np.unique(epochs) if (epochs == e).sum() >= 2]
+        if len(dips) < 2:
+            continue
+        dips = np.array(dips)
+        if np.mean(dips) >= 0.7 * depth and np.mean(dips > 0.4 * depth) >= 0.75:
+            best = k
+    return best
 
 
 def _same_period(p: float, q: float, tol: float = 0.02) -> bool:

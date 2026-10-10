@@ -137,6 +137,20 @@ class DB:
             )
             return cid, True
 
+    def harmonic_twin(self, target: str, engine: str, period: float, job: str | None = None, kmax: int = 40, tol: float = 3e-3) -> str | None:
+        """dedupe key of a candidate from an earlier job on ``target`` at an
+        integer multiple or fraction of ``period`` (an old run's period alias).
+        Signals from the same job are distinct by construction."""
+        for r in self.all("SELECT dedupe, metrics FROM candidates WHERE target=? AND engine=? AND job IS NOT ?", (target, engine, job)):
+            q = (json.loads(r["metrics"] or "{}")).get("period")
+            if not q:
+                continue
+            ratio = max(q, period) / min(q, period)
+            k = round(ratio)
+            if 1 <= k <= kmax and abs(ratio / k - 1) < tol:
+                return r["dedupe"]
+        return None
+
     def has_candidate(self, dedupe: str) -> bool:
         return self.one("SELECT 1 AS x FROM candidates WHERE dedupe=?", (dedupe,)) is not None
 

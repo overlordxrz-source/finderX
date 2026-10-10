@@ -148,3 +148,22 @@ def test_cleaning_keeps_transits_and_drops_spikes_and_edges():
     intr = box(t, 3.3, 3001.6, 0.12, 1.0) > 0
     assert keep[intr].mean() > 0.9          # transits survive
     assert not keep[0] and not keep[-1]     # segment edges trimmed
+
+
+@pytest.mark.parametrize("p_true,depth,dur", [(0.95, 0.02, 0.12), (0.62, 0.015, 0.09), (0.7, 0.03, 0.10)])
+def test_short_deep_eclipses_are_found_at_their_own_period(p_true, depth, dur):
+    # A deep short-period dip gives a broad BLS peak that the running-median
+    # SDE flattens, so the search used to lock onto 2× or 3× the period.
+    t, f = sector(12, noise=1e-3, days=25.0)
+    f -= box(t, p_true, 3000.3, dur, depth)
+    s = search(t, f)[0][0]
+    assert s.period == pytest.approx(p_true, rel=3e-3)
+    assert s.n_transits >= 20
+
+
+def test_fundamental_check_keeps_a_planet_with_hidden_alternate_transits():
+    # transits every 6 d; data exist at half-period epochs, which are flat
+    t, f = sector(13, noise=5e-4)
+    f -= box(t, 6.0, 3001.0, 0.15, 3e-3)
+    s = search(t, f)[0][0]
+    assert s.period == pytest.approx(6.0, rel=3e-3)

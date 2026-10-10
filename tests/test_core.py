@@ -199,3 +199,70 @@ def test_archival_check_catches_the_eclipsing_neighbour(monkeypatch):
     res = ar.check(10.0, 0.0, P, t_ref, dur, depth, stars, "1", 0.002, 1e-6)
     assert res["verdict"] == "caught_on_neighbour"
     assert res["stars"][0]["gaia"] == "2" and res["stars"][0]["n_in"] >= 3
+
+
+def test_planner_keeps_night_events_and_drops_daytime_ones():
+    from datetime import datetime, timezone
+
+    from astropy.time import Time
+
+    from finderx import planner
+
+    now = datetime(2026, 10, 5, 0, 0, tzinfo=timezone.utc)
+    obs = planner.observer_from({"key": "lco-ctio"})
+    night_mid = Time(datetime(2026, 10, 5, 4, 45, tzinfo=timezone.utc)).jd - 2457000   # local midnight at CTIO
+
+    def cand(cid, t0):
+        return {"id": cid, "engine": "transit", "kind": "planet_candidate", "title": cid, "target": cid, "status": "new",
+                "ra": 20.0, "dec": -30.0, "flags": [],
+                "metrics": {"period": 1.0, "t0": t0, "duration": 0.1, "depth": 0.01, "snr": 40, "n_transits": 20, "transit_times": [t0 - 200, t0]}}
+
+    events = planner.predict([cand("night", night_mid), cand("day", night_mid + 0.5)], obs, days=4, now=now)
+    assert {e["id"] for e in events} == {"night"}
+    assert len(events) >= 3
+    assert all(e["quality"] == "full" and e["alt"][4] > 45 for e in events)
+    assert all(e["mid_utc"].endswith(("04:44", "04:45", "04:46")) for e in events)
+
+
+def test_rerun_with_corrected_period_refreshes_the_old_candidate():
+    from finderx.db import DB
+
+    db = DB(":memory:")
+    base = {"engine": "transit", "kind": "eclipsing_binary", "target": "TIC 1", "title": "x", "score": 0.5}
+    old, _ = db.candidate_upsert({**base, "job": "j1", "dedupe": "transit:1:eclipsing_binary:4.737", "metrics": {"period": 4.7371742}})
+    db.candidate_upsert({**base, "job": "j1", "dedupe": "transit:1:planet_candidate:11.3", "metrics": {"period": 11.3}})
+    assert db.harmonic_twin("TIC 1", "transit", 0.947476, job="j2") == "transit:1:eclipsing_binary:4.737"
+    assert db.harmonic_twin("TIC 1", "transit", 0.947476, job="j1") is None   # same job: a distinct signal
+    assert db.harmonic_twin("TIC 1", "transit", 1.3, job="j2") is None
+
+
+def test_archival_partial_eclipse_points_do_not_rule_out_the_target(monkeypatch):
+    # archival epochs that land on ingress/egress are only partly dimmed; a box
+    # model called that "full brightness mid-eclipse" and excluded the target
+    import numpy as np
+
+    from finderx import archival as ar
+
+    P, t_ref, dur, depth = 5.0, 3000.0, 0.2, 0.07
+    # TESS-like template: V-ish eclipse, flat outside
+    tt = np.arange(t_ref - 30, t_ref + 30, 10 / 1440)
+    dt = (((tt - t_ref) / P + 0.5) % 1 - 0.5) * P
+    tf = 1 - depth * np.clip(1 - np.abs(dt) / (dur / 2), 0, 1)
+    tmpl = ar.eclipse_template(tt, tf, P, t_ref, dur)
+    # three survey epochs: two on the eclipse wings, one near mid-eclipse; the rest out of eclipse
+    k = np.arange(-300, -280)
+    t_obs = t_ref + k * P + np.r_[0.075, -0.08, 0.01, np.linspace(0.6, 4.0, 17)]
+    f_true = 1 - depth * np.clip(1 - np.abs(t_obs - t_ref - k * P) / (dur / 2), 0, 1)
+    lc = {"survey": "Gaia DR3 epochs", "id": "Gaia DR3 1", "gaia": "1", "ra": 10.0, "dec": 0.0,
+          "t": t_obs, "f": f_true, "e": np.full(t_obs.size, 0.003)}
+    monkeypatch.setattr(ar, "ps1_lightcurves", lambda ra, dec: {})
+    monkeypatch.setattr(ar, "gaia_epoch_lightcurves", lambda ra, dec: {"1": lc})
+    stars = [{"Source": 1, "RA_ICRS": 10.0, "DE_ICRS": 0.0, "Gmag": 11.0}]
+    box = ar.check(10.0, 0.0, P, t_ref, dur, depth, stars, "1", 0.002, 1e-6)
+    shaped = ar.check(10.0, 0.0, P, t_ref, dur, depth, stars, "1", 0.002, 1e-6, template=tmpl)
+    assert shaped["verdict"] == "caught_on_target"
+    # the TESS product overstated the depth 5× (dilution / background): the
+    # target still dimmed on schedule, so it must not be ruled out
+    inflated = ar.check(10.0, 0.0, P, t_ref, dur, depth * 5, stars, "1", 0.002, 1e-6, template=ar.eclipse_template(tt, 1 - 5 * (1 - tf), P, t_ref, dur))
+    assert inflated["verdict"] == "caught_on_target"
+    assert box["verdict"] != "target_ruled_out"
