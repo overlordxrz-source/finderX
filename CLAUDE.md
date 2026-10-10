@@ -56,6 +56,12 @@ taught the pipeline; `python -m finderx bundle/import` moves candidates
   eclipse depth — ground-based seeing-limited photometry would settle it."
 - Re-run a promising star with more sectors before writing it up:
   `scan transit --tic <id> --sectors 4`.
+- Run `pixels <id>` before any note that calls something a planet or names
+  a VSX target: the difference image (and Pan-STARRS / Gaia epoch
+  photometry) says which star actually dims. Most TESS "binaries" in crowded
+  southern fields turn out to be a neighbour 20–60″ away.
+- `plan --site <preset>` gives observable eclipse windows if the owner wants
+  to follow something up with a telescope.
 - Check ExoFOP (`https://exofop.ipac.caltech.edu/tess/target.php?id=<TIC>`)
   for anything the bulk catalogs missed.
 
@@ -63,7 +69,9 @@ taught the pipeline; `python -m finderx bundle/import` moves candidates
 
 - `finderx/lightcurve.py` – MAST product discovery, FITS loading, detrending
 - `finderx/analysis.py` – BLS transit search + vetting tests, Lomb-Scargle + variable typing (pure, unit-tested)
-- `finderx/engines/` – `transit`, `stellar`, `galaxy`, `solar`; each is `run(ctx) -> dict`
+- `finderx/engines/` – `transit`, `stellar`, `galaxy`, `solar`, `pixels`; each is `run(ctx) -> dict`
+- `finderx/pixels.py` (TESScut difference imaging), `finderx/archival.py` (PS1 + Gaia epochs),
+  `finderx/planner.py` (observability), `finderx/notify.py` (ntfy / Discord)
 - `finderx/jobs.py` – job threads, cancellation, event bus (SSE + CLI printer)
 - `finderx/db.py`, `finderx/report.py`, `finderx/server.py`, `finderx/__main__.py`
 - `finderx/web/` – the terminal UI (vanilla ES modules, no build step)

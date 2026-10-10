@@ -117,6 +117,9 @@ class JobContext:
         cid, is_new = self.db.candidate_upsert(cand)
         if is_new:
             self.db.job_bump(self.id, candidates=1)
+            from . import notify
+
+            notify.on_candidate(self.db, cand, cid)
         self.count("candidates")
         self.emit(
             "candidate",

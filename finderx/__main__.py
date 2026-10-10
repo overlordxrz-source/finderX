@@ -14,6 +14,7 @@
   python -m finderx report FXT-0001
   python -m finderx pixels FXT-0001               # which star is dimming? (TESS difference image)
   python -m finderx plan --site lco-ctio          # when can you watch your candidates eclipse?
+  python -m finderx notify --topic my-secret-topic --test   # pushes to your phone via ntfy.sh
   python -m finderx export --status confirmed --format csv
   python -m finderx bundle --out mine.json.gz     # share candidates with plots + notes
   python -m finderx import docs/first-light.json.gz
@@ -214,6 +215,25 @@ def cmd_plan(a) -> None:
             print(f"  {o['name']:<9} score {o['score']:>3}  V {o['vmag']:<5} best {o['best_utc']} UTC at {o['best_alt']}°  ({o['hours_up']} h above 30°)")
 
 
+def cmd_notify(a) -> None:
+    from . import notify
+
+    db = dbmod.get()
+    s = db.meta_get("notify", {}) or {}
+    if a.topic is not None:
+        s["ntfy_topic"] = a.topic or None
+    if a.discord is not None:
+        s["discord_webhook"] = a.discord or None
+    if a.min_score is not None:
+        s["min_score"] = a.min_score
+    db.meta_set("notify", s)
+    cfg = notify.settings(db)
+    print(f"ntfy topic: {cfg['ntfy_topic'] or '—'} · discord: {'set' if cfg['discord_webhook'] else '—'} · min score {cfg['min_score']}")
+    if a.test:
+        sent = notify.send(db, "finderX test", "Notifications are working. Clear skies!")
+        print("sent via " + (", ".join(sent) or "nothing (no channel configured)"))
+
+
 def cmd_bundle(a) -> None:
     import gzip
 
@@ -336,6 +356,13 @@ def main(argv=None) -> None:
     s.add_argument("--days", type=float, default=14)
     s.add_argument("--json", action="store_true")
     s.set_defaults(fn=cmd_plan)
+
+    s = sub.add_parser("notify", help="phone notifications (ntfy.sh / Discord) for strong candidates")
+    s.add_argument("--topic", help="ntfy.sh topic name (subscribe to it in the ntfy app); '' to clear")
+    s.add_argument("--discord", help="Discord webhook URL; '' to clear")
+    s.add_argument("--min-score", type=float)
+    s.add_argument("--test", action="store_true")
+    s.set_defaults(fn=cmd_notify)
 
     s = sub.add_parser("bundle", help="export candidates + plots + notes to share")
     s.add_argument("--out", default="finderx-bundle.json.gz")
