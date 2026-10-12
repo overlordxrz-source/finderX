@@ -1,6 +1,6 @@
 # finderX
 
-![finderX sky UI: Orion Nebula region](docs/ui.png)
+![finderX sky UI: Orion Nebula region](docs/ui.jpg)
 
 > A real-time cosmic discovery engine. Hunt for uncatalogued stars, anomalous objects, asteroids, and quasar candidates using live astronomical survey data and ML — all from a localhost UI.
 
